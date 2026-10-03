@@ -169,6 +169,8 @@ async function main() {
   await sleep(400)
   const settingsText = await evalJs('document.body.textContent')
   check('设置界面（含 API Key 与明文告知）', settingsText.includes('API Key') && settingsText.includes('明文保存在本机浏览器存储'))
+  check('设置界面有备份导出/导入', settingsText.includes('导出备份') && settingsText.includes('导入备份'))
+  check('备份说明写清「不含 API Key」', settingsText.includes('不包含 API Key'))
 
   await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent === '游玩')?.click()`)
   await sleep(400)
@@ -189,6 +191,7 @@ main().catch((e) => {
   chrome.kill()
   process.exit(1)
 })
+
 
 
 

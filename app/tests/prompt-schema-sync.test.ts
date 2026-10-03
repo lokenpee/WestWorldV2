@@ -1,7 +1,7 @@
-import { execFileSync } from 'node:child_process'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { renderAll } from '../scripts/render-prompt-schema.ts'
 
 const ROOT = join(import.meta.dirname, '..')
 const PROMPTS_DIR = join(ROOT, 'src', 'core', 'prompts')
@@ -17,15 +17,17 @@ function walk(dir: string): string[] {
 }
 
 describe('提示词与 TypeBox schema 的一致性（ADR-011）', () => {
-  it('render:prompts --check 通过（生成区与 schema 一致）', () => {
-    // 有任何差异时脚本以退出码 1 结束
-    expect(() =>
-      execFileSync('pnpm', ['render:prompts', '--check'], {
-        cwd: ROOT,
-        stdio: 'pipe',
-        shell: process.platform === 'win32',
-      }),
-    ).not.toThrow()
+  it('生成区与 schema 一致（check 模式下没有文件需要重新生成）', () => {
+    const report = renderAll({ check: true })
+    expect(report.issues).toEqual([])
+    expect(report.changedFiles, `这些文件需要重新生成：${report.changedFiles.join(', ')}`).toEqual([])
+  })
+
+  it('检查是幂等的（连续两次结果相同）', () => {
+    const a = renderAll({ check: true })
+    const b = renderAll({ check: true })
+    expect(a.changedFiles).toEqual(b.changedFiles)
+    expect(a.markerCount).toBe(b.markerCount)
   })
 
   it('每个生成区都引用了已注册的 schema 名', () => {
@@ -36,30 +38,22 @@ describe('提示词与 TypeBox schema 的一致性（ADR-011）', () => {
       'WorldAssetsExtractionSchema',
       'NarrativeAssetsExtractionSchema',
     ])
-    const files = walk(PROMPTS_DIR)
     const markers: string[] = []
-    for (const f of files) {
-      const src = readFileSync(f, 'utf8')
-      for (const m of src.matchAll(/AUTO-GENERATED:START\s+source=(\w+)/g)) {
+    for (const f of walk(PROMPTS_DIR)) {
+      for (const m of readFileSync(f, 'utf8').matchAll(/AUTO-GENERATED:START\s+source=(\w+)/g)) {
         if (m[1]) markers.push(m[1])
       }
     }
     expect(markers.length).toBeGreaterThan(0)
-    const unknown = markers.filter((n) => !known.has(n))
-    expect(unknown, `未注册的 schema：${unknown.join(', ')}`).toEqual([])
+    expect(markers.filter((n) => !known.has(n))).toEqual([])
   })
 
-  it('两个 P1 提示词都含生成区', () => {
-    const files = walk(PROMPTS_DIR).map((f) => f.replace(/\\/g, '/'))
-    const p1a = files.find((f) => f.endsWith('01-extract-world-assets.md'))
-    const p1b = files.find((f) => f.endsWith('02-extract-narrative-assets.md'))
-    expect(p1a && readFileSync(p1a, 'utf8')).toContain('AUTO-GENERATED:START')
-    expect(p1b && readFileSync(p1b, 'utf8')).toContain('AUTO-GENERATED:START')
-  })
-
-  it('生成区内容带「勿手改」提示', () => {
-    const file = walk(PROMPTS_DIR).find((f) => f.endsWith('01-extract-world-assets.md'))
-    const src = readFileSync(file!, 'utf8')
-    expect(src).toContain('勿手改')
+  it('两个 P1 提示词都含生成区，且带「勿手改」提示', () => {
+    const files = walk(PROMPTS_DIR)
+    const p1a = files.find((f) => f.endsWith('01-extract-world-assets.md'))!
+    const p1b = files.find((f) => f.endsWith('02-extract-narrative-assets.md'))!
+    expect(readFileSync(p1a, 'utf8')).toContain('AUTO-GENERATED:START')
+    expect(readFileSync(p1b, 'utf8')).toContain('AUTO-GENERATED:START')
+    expect(readFileSync(p1a, 'utf8')).toContain('勿手改')
   })
 })

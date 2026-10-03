@@ -58,7 +58,7 @@ export const StoredCharacterSnapshotSchema = Type.Composite(
   [
     CharacterSnapshotSchema,
     Type.Object({
-      id: Type.String({ description: '代码分配的快照 id。格式 C{章号}-P{本章序号}，例：C037-P03' }),
+      id: Type.String({ description: '代码分配的快照 id。格式 C{章号}-P{3 位序号}，例：C037-P003' }),
       bookId: Type.String({ description: '所属书籍 id。' }),
       chapterIndex: Type.String({
         description: '章节标识。字符串以支持切块，例："37" 或 "101.1"。',
@@ -73,3 +73,4 @@ export const StoredCharacterSnapshotSchema = Type.Composite(
 )
 
 export type StoredCharacterSnapshot = Static<typeof StoredCharacterSnapshotSchema>
+

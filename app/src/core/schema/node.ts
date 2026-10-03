@@ -82,7 +82,7 @@ export const StoredNodeSchema = Type.Composite(
     NodeSchema,
     Type.Object({
       id: Type.String({
-        description: '代码分配的节点 id。格式 C{章号}-N{本章序号}，例：C037-N02',
+        description: '代码分配的节点 id。格式 C{章号}-N{3 位序号}，例：C037-N002',
       }),
       bookId: Type.String({ description: '所属书籍 id。' }),
       chapterIndex: Type.String({ description: '章节标识。' }),
@@ -113,4 +113,5 @@ export const StoredNodeSchema = Type.Composite(
 )
 
 export type StoredNode = Static<typeof StoredNodeSchema>
+
 

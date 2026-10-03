@@ -168,7 +168,7 @@ function walkMarkdown(dir: string): string[] {
   return out
 }
 
-interface RenderIssue {
+export interface RenderIssue {
   file: string
   message: string
 }
@@ -191,50 +191,70 @@ function renderFile(file: string): { next: string; issues: RenderIssue[] } {
   return { next, issues }
 }
 
-function main(): void {
-  const check = process.argv.includes('--check')
-  const files = walkMarkdown(PROMPTS_DIR)
+export interface RenderReport {
+  files: number
+  markerCount: number
+  changedFiles: string[]
+  issues: RenderIssue[]
+}
 
-  let changed = 0
+/**
+ * 渲染（或检查）全部提示词的生成区。
+ *
+ * 导出成函数是为了让测试**在进程内调用** —— 比 spawn 一个子进程更快、更稳
+ * （Windows 上 `pnpm` 是 .cmd，走子进程有各种坑）。
+ */
+export function renderAll(options: { check: boolean }): RenderReport {
+  const files = walkMarkdown(PROMPTS_DIR)
+  const changedFiles: string[] = []
+  const issues: RenderIssue[] = []
   let markerCount = 0
-  const allIssues: RenderIssue[] = []
 
   for (const file of files) {
     const original = readFileSync(file, 'utf8')
-    const before = [...original.matchAll(MARKER_RE)].length
-    markerCount += before
+    markerCount += [...original.matchAll(MARKER_RE)].length
 
-    const { next, issues } = renderFile(file)
-    allIssues.push(...issues)
+    const { next, issues: fileIssues } = renderFile(file)
+    issues.push(...fileIssues)
 
     if (original !== next) {
-      changed += 1
       const rel = relative(ROOT, file)
-      if (check) {
-        console.error(`✗ ${rel}：生成区与 schema 不一致（跑 pnpm render:prompts 修复）`)
-      } else {
-        writeFileSync(file, next, 'utf8')
-        console.log(`✎ ${rel}：已更新`)
-      }
+      changedFiles.push(rel)
+      if (!options.check) writeFileSync(file, next, 'utf8')
     }
   }
 
-  for (const issue of allIssues) {
+  return { files: files.length, markerCount, changedFiles, issues }
+}
+
+function main(): void {
+  const check = process.argv.includes('--check')
+  const report = renderAll({ check })
+
+  for (const rel of report.changedFiles) {
+    if (check) console.error(`✗ ${rel}：生成区与 schema 不一致（跑 pnpm render:prompts 修复）`)
+    else console.log(`✎ ${rel}：已更新`)
+  }
+  for (const issue of report.issues) {
     console.error(`✗ ${issue.file}：${issue.message}`)
   }
 
-  console.log(`\n扫描 ${files.length} 个提示词文件，共 ${markerCount} 个生成区`)
+  console.log(`\n扫描 ${report.files} 个提示词文件，共 ${report.markerCount} 个生成区`)
+
   if (check) {
-    if (changed > 0 || allIssues.length > 0) {
-      console.error(`\n检查失败：${changed} 个文件需要重新生成，${allIssues.length} 个问题`)
+    if (report.changedFiles.length > 0 || report.issues.length > 0) {
+      console.error(
+        `\n检查失败：${report.changedFiles.length} 个文件需要重新生成，${report.issues.length} 个问题`,
+      )
       process.exit(1)
     }
     console.log('检查通过：生成区与 schema 一致')
     return
   }
-  console.log(changed === 0 ? '没有需要更新的内容' : `已更新 ${changed} 个文件`)
+  console.log(report.changedFiles.length === 0 ? '没有需要更新的内容' : `已更新 ${report.changedFiles.length} 个文件`)
 }
 
-main()
-
-
+// 只有被当作脚本直接运行时才执行 main（被测试 import 时不跑）
+if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop() ?? '')) {
+  main()
+}

@@ -15,8 +15,10 @@
 | 构建 | **Vite** |
 | 存储 | **IndexedDB**，通过 **Dexie** 访问 |
 | 样式 | **Tailwind** |
-| 组件 | **shadcn/ui** |
-| 地图 | **React Flow** |
+| 组件 | **shadcn/ui**（复制进 `src/features/ui/`，可改） |
+| 地图 | **React Flow**（@xyflow/react）+ @dagrejs/dagre 布局（ADR-015） |
+| UI 状态 | **Zustand**（只放界面状态，业务数据走 useLiveQuery）（ADR-016） |
+| 路由 | **不用路由库**，顶层 tab 切换（ADR-016） |
 | 包管理 | **pnpm** |
 | 版本控制 | **Git** |
 | 测试 | **Vitest** |
@@ -220,6 +222,7 @@ P2 每 100 章已经合并过一轮，但 **P3 的全局合并可能把 P2 阶�
 - [x] 分章正则（含标题捕获，已确认）
 - [x] 世界资产合并规则（参考 WestWorld，已确认）
 - [x] 提示词结构（4 份，已建文件，见第 6 节）
+
 
 
 

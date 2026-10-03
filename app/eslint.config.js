@@ -19,6 +19,12 @@ export default tseslint.config(
     },
   },
 
+  // scripts/ 与 tests/ 是 Node 环境（有 process / console）
+  {
+    files: ['scripts/**/*.{js,mjs,ts}', 'tests/**/*.{ts,js,mjs}'],
+    languageOptions: { globals: { ...globals.node } },
+  },
+
   // ADR-012 第 1、2 条：core 不能依赖 features，不能碰 React / DOM
   {
     files: [CORE],
@@ -60,3 +66,4 @@ export default tseslint.config(
     },
   },
 )
+

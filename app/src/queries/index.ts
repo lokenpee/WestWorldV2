@@ -1,6 +1,8 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { getCanonDb } from '@/core/db/canon.ts'
 import type {
+  Character,
+  EventLine,
   Book,
   CompileProgress,
   StoredCharacterSnapshot,
@@ -16,7 +18,11 @@ import type {
  */
 
 export function useBooks(): Book[] | undefined {
-  return useLiveQuery(() => getCanonDb().books.orderBy('createdAt').reverse().toArray(), [])
+  // 同 repo.listBooks：books 没为 createdAt 建索引，不能 orderBy，取回来内存排序
+  return useLiveQuery(async () => {
+    const rows = await getCanonDb().books.toArray()
+    return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }, [])
 }
 
 export function useProgress(bookId: string | null): CompileProgress | undefined {
@@ -51,3 +57,19 @@ export function useNodes(bookId: string | null): StoredNode[] | undefined {
     )
   }, [bookId])
 }
+
+export function useCharacters(bookId: string | null): Character[] | undefined {
+  return useLiveQuery(
+    async () => (bookId ? getCanonDb().characters.where('bookId').equals(bookId).toArray() : []),
+    [bookId],
+  )
+}
+
+export function useEventLines(bookId: string | null): EventLine[] | undefined {
+  return useLiveQuery(async () => {
+    if (!bookId) return []
+    const rows = await getCanonDb().eventLines.where('bookId').equals(bookId).toArray()
+    return rows.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }))
+  }, [bookId])
+}
+

@@ -1,8 +1,8 @@
 /**
- * 端到端检查（一次性开发工具）。
+ * 端到端检查（开发工具）。
  *
- * 用 Chrome DevTools Protocol 打开页面、点击、读 DOM ——
- * 因为环境里没有 Playwright，而 `--dump-dom` 只能看首屏。
+ * 用 Chrome DevTools Protocol 打开页面、注入数据、点击、读 DOM ——
+ * 因为环境里没有 Playwright，而 --dump-dom 只能看首屏。
  *
  * 用法：node scripts/e2e-check.mjs http://localhost:5201/
  */
@@ -13,7 +13,8 @@ import { join } from 'node:path'
 
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 const URL = process.argv[2] ?? 'http://localhost:5201/'
-const PORT = 9333
+// 用随机端口：固定端口会被上一次没杀干净的 Chrome 占用，导致连到旧实例
+const PORT = 9400 + Math.floor(Math.random() * 500)
 
 const profile = mkdtempSync(join(tmpdir(), 'ww-e2e-'))
 const chrome = spawn(
@@ -25,7 +26,7 @@ const chrome = spawn(
     '--no-default-browser-check',
     `--user-data-dir=${profile}`,
     `--remote-debugging-port=${PORT}`,
-    'about:blank',
+    URL,
   ],
   { stdio: 'ignore' },
 )
@@ -67,6 +68,37 @@ function makeSend(ws) {
     })
 }
 
+/** 往 IndexedDB 里塞一本书 + 人物 + 事件线，让资产界面有东西可显示。 */
+const SEED = `
+(async () => {
+  // 不指定版本：应用加载时已经用 Dexie 建好库（Dexie 会把版本号 ×10，写死会 VersionError）
+  const req = indexedDB.open('westworld_canon')
+  const db = await new Promise((res, rej) => {
+    req.onupgradeneeded = () => { throw new Error('库不存在：应用应当先建好') }
+
+    req.onsuccess = () => res(req.result)
+    req.onerror = () => rej(req.error)
+  })
+  const tx = db.transaction(['books','characters','eventLines','nodes'], 'readwrite')
+  tx.objectStore('books').put({ id: 'bk_e2e', title: 'E2E 测试书', createdAt: new Date().toISOString() })
+  tx.objectStore('characters').put({
+    id: 'P001', bookId: 'bk_e2e', name: '贾琏', aliases: ['琏二爷'], roleWeight: 'NPC',
+    relations: [], sourceSnapshotIds: ['C1-P001'], updatedAt: ''
+  })
+  tx.objectStore('nodes').put({
+    id: 'C1-N001', bookId: 'bk_e2e', chapterIndex: '1', chapterName: '第一章', order: 0,
+    name: '资金异常', summary: '手头宽裕', actors: ['贾琏'], quote: '……', confidence: 0.9, createdBy: 'P1'
+  })
+  tx.objectStore('eventLines').put({
+    id: 'L01', bookId: 'bk_e2e', title: '走私案', nodeIds: ['C1-N001'], chapters: ['1'],
+    cause: '起', process: '经', result: '果', lineStatus: 'open', characterIds: ['P001'], updatedAt: ''
+  })
+  await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error) })
+  db.close()
+  return 'seeded'
+})()
+`
+
 async function main() {
   const ws = new WebSocket(await targetWs())
   await new Promise((r) => ws.addEventListener('open', r, { once: true }))
@@ -79,42 +111,49 @@ async function main() {
 
   const evalJs = async (expression) => {
     const r = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true })
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.text)
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.text + ' :: ' + JSON.stringify(r.exceptionDetails.exception?.description ?? ''))
     return r.result.value
   }
 
   const results = []
+  const check = (step, ok) => results.push({ step, ok })
 
-  // 首屏：资产 tab
-  results.push({
-    step: '首屏渲染',
-    ok: (await evalJs('document.body.innerText')).includes('导入小说'),
-  })
+  check('首屏渲染（导入页）', String(await evalJs('document.body.textContent')).includes('导入小说'))
 
-  // 点「设置」
+  // 注入数据后重载 —— 应该自动选中那本书并显示资产 tab
+  await evalJs(SEED)
+  await send('Page.reload')
+  await sleep(1800)
+  const assetText = await evalJs('document.body.textContent')
+  check('自动选中已有书籍（不再退回导入页）', assetText.includes('人物') && assetText.includes('事件网络'))
+  check('人物实体显示', assetText.includes('贾琏') && assetText.includes('P001'))
+
+  // 切到「事件线」
+  await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('事件线'))?.click()`)
+  await sleep(400)
+  const lineText = await evalJs('document.body.textContent')
+  check('事件线显示（含起因经过结果）', lineText.includes('走私案') && lineText.includes('起因'))
+
+  // 切到「事件网络」—— React Flow 应当挂载
+  await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('事件网络'))?.click()`)
+  await sleep(900)
+  const netText = await evalJs('document.body.textContent')
+  const hasFlow = await evalJs(`!!document.querySelector('.react-flow')`)
+  check('事件网络渲染（React Flow 挂载）', hasFlow)
+  check('网络图例显示', netText.includes('双击一条线'))
+
+  // 设置 / 游玩
   await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent === '设置')?.click()`)
   await sleep(400)
-  const settingsText = await evalJs('document.body.innerText')
-  results.push({ step: '切到「设置」', ok: settingsText.includes('API Key') && settingsText.includes('并发数') })
-  results.push({ step: '设置里有明文存储告知', ok: settingsText.includes('明文保存在本机浏览器存储') })
+  const settingsText = await evalJs('document.body.textContent')
+  check('设置界面（含 API Key 与明文告知）', settingsText.includes('API Key') && settingsText.includes('明文保存在本机浏览器存储'))
 
-  // 点「游玩」
   await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent === '游玩')?.click()`)
   await sleep(400)
-  const playText = await evalJs('document.body.innerText')
-  results.push({ step: '切到「游玩」', ok: playText.includes('还没有开始游玩') })
-
-  // 回「资产」
-  await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent === '资产')?.click()`)
-  await sleep(400)
-  results.push({ step: '切回「资产」', ok: (await evalJs('document.body.innerText')).includes('导入小说') })
-
-  // 控制台报错检查
-  const errors = await evalJs('window.__e2eErrors ? window.__e2eErrors.length : 0')
+  check('游玩界面', (await evalJs('document.body.textContent')).includes('还没有开始游玩'))
 
   console.log('检查项：')
   for (const r of results) console.log(`  ${r.ok ? '✅' : '❌'} ${r.step}`)
-  console.log(`\n控制台错误数：${errors}`)
 
   const failed = results.filter((r) => !r.ok).length
   ws.close()
@@ -128,5 +167,8 @@ main().catch((e) => {
   chrome.kill()
   process.exit(1)
 })
+
+
+
 
 

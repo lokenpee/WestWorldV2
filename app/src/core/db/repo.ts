@@ -39,7 +39,11 @@ export async function getBook(bookId: string): Promise<Book | undefined> {
 }
 
 export async function listBooks(): Promise<Book[]> {
-  return getCanonDb().books.orderBy('createdAt').reverse().toArray()
+  // ⚠️ 不能用 orderBy('createdAt')：books 表没有为 createdAt 建索引，
+  // Dexie 对未索引字段排序会抛 SchemaError（曾经把整个 UI 搞崩过）。
+  // 书的本数很少，取回来在内存里排即可。
+  const rows = await getCanonDb().books.toArray()
+  return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 
 // ── 章节 ──
@@ -152,3 +156,4 @@ export async function deleteBook(bookId: string): Promise<void> {
     },
   )
 }
+

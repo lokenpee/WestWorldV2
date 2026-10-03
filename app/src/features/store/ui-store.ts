@@ -7,7 +7,7 @@ interface UiState {
   /** 当前正在看的书 / 世界线（null = 还没导入任何东西） */
   bookId: string | null
   /** 资产界面里选中的分类 */
-  assetTab: 'characters' | 'locations' | 'nodes'
+  assetTab: 'characters' | 'locations' | 'nodes' | 'lines' | 'network'
   /** 选中的资产 id（右侧详情用） */
   selectedAssetId: string | null
 
@@ -31,3 +31,4 @@ export const useUiStore = create<UiState>((set) => ({
   setAssetTab: (assetTab) => set({ assetTab, selectedAssetId: null }),
   setSelectedAssetId: (selectedAssetId) => set({ selectedAssetId }),
 }))
+

@@ -1,14 +1,25 @@
-import { useState } from 'react'
-import { deleteCharacter, deleteLocation, deleteNode } from '@/core/assets/edit.ts'
+import { useEffect, useState } from 'react'
+import { deleteCharacter, deleteEventLine, deleteLocation, deleteNode } from '@/core/assets/edit.ts'
+import { runAll } from '@/core/pipeline/run-all.ts'
 import { CompilePanel } from '@/features/compile/CompilePanel.tsx'
 import { ImportPanel } from '@/features/import/ImportPanel.tsx'
-import { useCharacterSnapshots, useLocations, useNodes, useProgress } from '@/queries/index.ts'
+import { NetworkPanel } from '@/features/network/NetworkPanel.tsx'
+import {
+  useBooks,
+  useCharacters,
+  useEventLines,
+  useLocations,
+  useNodes,
+  useProgress,
+} from '@/queries/index.ts'
 import { useUiStore } from '@/features/store/ui-store.ts'
 
 const TABS = [
   { key: 'characters', label: '人物' },
   { key: 'locations', label: '地点' },
   { key: 'nodes', label: '事件节点' },
+  { key: 'lines', label: '事件线' },
+  { key: 'network', label: '事件网络' },
 ] as const
 
 function Empty({ text }: { text: string }) {
@@ -16,7 +27,7 @@ function Empty({ text }: { text: string }) {
 }
 
 /**
- * 资产工作台：导入 → 进度 → 资产浏览与编辑。
+ * 资产工作台：导入 → 进度 → 资产浏览与编辑 → 事件网络。
  *
  * 数据全部通过 queries/ 订阅（useLiveQuery）—— 删除/编辑后列表**自动刷新**。
  */
@@ -24,15 +35,22 @@ export function AssetsPanel() {
   const bookId = useUiStore((s) => s.bookId)
   const assetTab = useUiStore((s) => s.assetTab)
   const setAssetTab = useUiStore((s) => s.setAssetTab)
-  const setSelectedAssetId = useUiStore((s) => s.setSelectedAssetId)
+  const setBookId = useUiStore((s) => s.setBookId)
   const [showImport, setShowImport] = useState(false)
+  const [rerunning, setRerunning] = useState(false)
+
+  const books = useBooks()
+  // 刷新页面后 store 是空的 —— 自动选最近的一本书，而不是让用户重新导入
+  useEffect(() => {
+    if (!bookId && books && books.length > 0) setBookId(books[0]!.id)
+  }, [bookId, books, setBookId])
 
   const progress = useProgress(bookId)
-  const characters = useCharacterSnapshots(bookId)
+  const characters = useCharacters(bookId)
   const locations = useLocations(bookId)
   const nodes = useNodes(bookId)
+  const lines = useEventLines(bookId)
 
-  // 没有书 → 只显示导入
   if (!bookId || showImport) {
     return (
       <div className="h-full overflow-auto">
@@ -56,6 +74,8 @@ export function AssetsPanel() {
     characters: characters?.length ?? 0,
     locations: locations?.length ?? 0,
     nodes: nodes?.length ?? 0,
+    lines: lines?.length ?? 0,
+    network: lines?.length ?? 0,
   }
 
   return (
@@ -78,10 +98,25 @@ export function AssetsPanel() {
             }
           >
             {t.label}
-            <span className="ml-1 text-xs text-neutral-400">{counts[t.key]}</span>
+            {t.key !== 'network' && <span className="ml-1 text-xs text-neutral-400">{counts[t.key]}</span>}
           </button>
         ))}
-        <div className="ml-auto">
+        <div className="ml-auto flex gap-2">
+          <button
+            type="button"
+            disabled={rerunning}
+            onClick={async () => {
+              setRerunning(true)
+              try {
+                await runAll(bookId)
+              } finally {
+                setRerunning(false)
+              }
+            }}
+            className="rounded border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40"
+          >
+            {rerunning ? '重跑中…' : '重跑合并'}
+          </button>
           <button
             type="button"
             onClick={() => setShowImport(true)}
@@ -95,30 +130,27 @@ export function AssetsPanel() {
       <div className="min-h-0 flex-1 overflow-auto">
         {assetTab === 'characters' &&
           (counts.characters === 0 ? (
-            <Empty text="还没有人物。提取完成后会出现在这里。" />
+            <Empty text="还没有人物实体。提取+合并完成后会出现在这里。" />
           ) : (
             <ul className="divide-y divide-neutral-100">
               {characters?.map((c) => (
-                <li
-                  key={c.id}
-                  className="flex cursor-pointer items-baseline gap-3 px-4 py-2 hover:bg-white"
-                  onClick={() => setSelectedAssetId(c.id)}
-                >
+                <li key={c.id} className="flex items-baseline gap-3 px-4 py-2 hover:bg-white">
                   <span className="font-mono text-xs text-neutral-400">{c.id}</span>
                   <span className="text-sm font-medium">{c.name}</span>
-                  {c.aliases_mentioned?.length ? (
-                    <span className="text-xs text-neutral-400">
-                      别名 {c.aliases_mentioned.join(' / ')}
-                    </span>
-                  ) : null}
+                  <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-600">
+                    {c.roleWeight}
+                  </span>
+                  {c.aliases.length > 0 && (
+                    <span className="text-xs text-neutral-400">别名 {c.aliases.join(' / ')}</span>
+                  )}
                   {c.identity && <span className="text-xs text-neutral-500">{c.identity}</span>}
+                  <span className="ml-auto text-[10px] text-neutral-400">
+                    {c.sourceSnapshotIds.length} 个快照
+                  </span>
                   <button
                     type="button"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      void deleteCharacter(c.id)
-                    }}
-                    className="ml-auto text-xs text-neutral-400 hover:text-red-600"
+                    onClick={() => void deleteCharacter(c.id)}
+                    className="text-xs text-neutral-400 hover:text-red-600"
                   >
                     删除
                   </button>
@@ -136,9 +168,7 @@ export function AssetsPanel() {
                 <li key={l.id} className="flex items-baseline gap-3 px-4 py-2 hover:bg-white">
                   <span className="font-mono text-xs text-neutral-400">{l.id}</span>
                   <span className="text-sm font-medium">{l.name}</span>
-                  {l.description && (
-                    <span className="text-xs text-neutral-500">{l.description}</span>
-                  )}
+                  {l.description && <span className="text-xs text-neutral-500">{l.description}</span>}
                   <button
                     type="button"
                     onClick={() => void deleteLocation(l.id)}
@@ -162,6 +192,11 @@ export function AssetsPanel() {
                     <span className="font-mono text-xs text-neutral-400">{n.id}</span>
                     <span className="text-sm font-medium">{n.name}</span>
                     <span className="text-xs text-neutral-400">第 {n.chapterIndex} 章</span>
+                    {n.eventLineIds && n.eventLineIds.length > 0 && (
+                      <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-700">
+                        {n.eventLineIds.join(' / ')}
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => void deleteNode(n.id)}
@@ -180,7 +215,52 @@ export function AssetsPanel() {
               ))}
             </ul>
           ))}
+
+        {assetTab === 'lines' &&
+          (counts.lines === 0 ? (
+            <Empty text="还没有事件线。跑完串联后会出现在这里。" />
+          ) : (
+            <ul className="divide-y divide-neutral-100">
+              {lines?.map((l) => (
+                <li key={l.id} className="px-4 py-3 hover:bg-white">
+                  <div className="flex items-baseline gap-3">
+                    <span className="font-mono text-xs text-neutral-400">{l.id}</span>
+                    <span className="text-sm font-medium">{l.title}</span>
+                    <span
+                      className={
+                        'rounded px-1.5 py-0.5 text-[10px] ' +
+                        (l.lineStatus === 'closed'
+                          ? 'bg-neutral-100 text-neutral-600'
+                          : 'bg-emerald-50 text-emerald-700')
+                      }
+                    >
+                      {l.lineStatus === 'closed' ? '已结束' : '进行中'}
+                    </span>
+                    <span className="text-[10px] text-neutral-400">
+                      {l.nodeIds.length} 节点 · 第 {l.chapters[0] ?? '?'}
+                      {l.chapters.length > 1 ? `–${l.chapters[l.chapters.length - 1]}` : ''} 章
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void deleteEventLine(l.id)}
+                      className="ml-auto text-xs text-neutral-400 hover:text-red-600"
+                    >
+                      删除
+                    </button>
+                  </div>
+                  <div className="mt-1 space-y-0.5 text-xs text-neutral-600">
+                    {l.cause && <p>起因：{l.cause}</p>}
+                    {l.process && <p>经过：{l.process}</p>}
+                    {l.result && <p>结果：{l.result}</p>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ))}
+
+        {assetTab === 'network' && <NetworkPanel lines={lines ?? []} nodes={nodes ?? []} />}
       </div>
     </div>
   )
 }
+

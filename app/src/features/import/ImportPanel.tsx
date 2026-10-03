@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { decodeBytes, decodeWith, type DecodeResult } from '@/core/pipeline/decode-text.ts'
 import { importBook } from '@/core/pipeline/import-book.ts'
-import { runP1 } from '@/core/pipeline/run-p1.ts'
+import { runAll } from '@/core/pipeline/run-all.ts'
 import { splitChapters, type ChapterDraft } from '@/core/pipeline/split-chapters.ts'
 import { useUiStore } from '@/features/store/ui-store.ts'
 
@@ -53,7 +53,7 @@ export function ImportPanel() {
       })
       setBookId(bookId)
       // 不 await：让 UI 立刻进入进度界面，编译在后台跑
-      void runP1(bookId)
+      void runAll(bookId)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -174,3 +174,4 @@ export function ImportPanel() {
     </div>
   )
 }
+

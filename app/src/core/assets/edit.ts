@@ -42,3 +42,15 @@ export async function deleteNode(id: string): Promise<void> {
   await getCanonDb().nodes.delete(id)
 }
 
+
+// ── 事件线 ──
+
+export type EventLineEdit = Partial<Pick<import('@/core/schema/index.ts').EventLine, 'title' | 'cause' | 'process' | 'result' | 'lineStatus'>>
+
+export async function updateEventLine(id: string, patch: EventLineEdit): Promise<void> {
+  await getCanonDb().eventLines.update(id, patch)
+}
+
+export async function deleteEventLine(id: string): Promise<void> {
+  await getCanonDb().eventLines.delete(id)
+}

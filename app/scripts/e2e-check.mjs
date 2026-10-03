@@ -150,6 +150,9 @@ async function main() {
   await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent === '保存')?.click()`)
   await sleep(600)
   check('保存后自动生效', (await evalJs('document.body.textContent')).includes('荣国府长孙'))
+  // 试跑一章（不点开始，只验证入口在）
+  check('有「试跑一章」入口', (await evalJs('document.body.textContent')).includes('试跑一章'))
+
   // 切到「事件线」
   await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('事件线'))?.click()`)
   await sleep(400)
@@ -191,6 +194,7 @@ main().catch((e) => {
   chrome.kill()
   process.exit(1)
 })
+
 
 
 

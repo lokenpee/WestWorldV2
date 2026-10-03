@@ -17,13 +17,20 @@ export function CompilePanel({ onCancel }: { onCancel?: () => void }) {
     if (el) el.scrollTop = el.scrollHeight
   }, [logs.length])
 
+  // 阶段名要说人话（P1/P2/P3 是内部代号）
+  const STAGE_NAME: Record<string, string> = {
+    P1: '逐章提取',
+    P2: '合并人物',
+    P3: '串联事件线',
+  }
+
   const pct = total > 0 ? Math.round(((completed + failed) / total) * 100) : 0
   const running = status === 'running'
 
   return (
     <div className="border-b border-neutral-200 bg-white px-4 py-3">
       <div className="flex items-center gap-4">
-        <span className="text-sm font-medium">{stage} 提取</span>
+        <span className="text-sm font-medium">{STAGE_NAME[stage] ?? stage}</span>
         <div className="h-2 flex-1 overflow-hidden rounded-full bg-neutral-100">
           <div className="h-full bg-neutral-800 transition-all" style={{ width: `${pct}%` }} />
         </div>
@@ -68,4 +75,5 @@ export function CompilePanel({ onCancel }: { onCancel?: () => void }) {
     </div>
   )
 }
+
 

@@ -4,6 +4,7 @@ import { runAll } from '@/core/pipeline/run-all.ts'
 import { AssetDetail, type AssetItem } from '@/features/assets/AssetDetail.tsx'
 import { CompilePanel } from '@/features/compile/CompilePanel.tsx'
 import { ImportPanel } from '@/features/import/ImportPanel.tsx'
+import { TryOnePanel } from '@/features/assets/TryOnePanel.tsx'
 import { NetworkPanel } from '@/features/network/NetworkPanel.tsx'
 import {
   useBooks,
@@ -53,6 +54,7 @@ export function AssetsPanel() {
   const [showImport, setShowImport] = useState(false)
   const [rerunning, setRerunning] = useState(false)
   const [selected, setSelected] = useState<AssetItem | null>(null)
+  const [trying, setTrying] = useState(false)
 
   const books = useBooks()
   const progress = useProgress(bookId)
@@ -123,6 +125,20 @@ export function AssetsPanel() {
           </button>
         ))}
         <div className="ml-auto flex gap-2">
+          <button
+            type="button"
+            onClick={() => setTrying(true)}
+            className="rounded border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-50"
+          >
+            试跑一章
+          </button>
+          <button
+            type="button"
+            onClick={() => setTrying(true)}
+            className="rounded border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-50"
+          >
+            试跑一章
+          </button>
           <button
             type="button"
             disabled={rerunning}
@@ -321,8 +337,11 @@ export function AssetsPanel() {
             onClose={() => setSelected(null)}
           />
         )}
+
+      {trying && <TryOnePanel bookId={bookId} onClose={() => setTrying(false)} />}
       </div>
     </div>
   )
 }
+
 

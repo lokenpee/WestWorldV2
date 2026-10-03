@@ -14,8 +14,6 @@ const usage = { input: 100, output: 50, totalTokens: 150, cost: 0.002 }
 const worldOk: CallModelResult<unknown> = {
   ok: true,
   data: {
-    chapter_index: '37',
-    chapter_name: '第三十七回',
     characters: [
       { name: '贾琏', aliases_mentioned: ['琏二爷'], confidence: 0.92 },
       { name: '琪官', confidence: 0.8 },
@@ -32,8 +30,6 @@ const worldOk: CallModelResult<unknown> = {
 const narrativeOk: CallModelResult<unknown> = {
   ok: true,
   data: {
-    chapter_index: '37',
-    chapter_name: '第三十七回',
     nodes: [
       {
         name: '贾琏的资金来源异常',
@@ -179,3 +175,4 @@ describe('P1：输入构造', () => {
     expect(msg).toContain('贾琏近来手头颇觉宽裕')
   })
 })
+

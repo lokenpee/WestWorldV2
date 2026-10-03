@@ -10,8 +10,6 @@ import {
 
 // 用《红楼梦》走私案那一段做样例（与 PRD 里的例子一致）
 const worldAssetsSample = {
-  chapter_index: '37',
-  chapter_name: '第三十七回 秋爽斋偶结海棠社',
   characters: [
     {
       name: '贾琏',
@@ -30,8 +28,6 @@ const worldAssetsSample = {
 }
 
 const narrativeAssetsSample = {
-  chapter_index: '37',
-  chapter_name: '第三十七回 秋爽斋偶结海棠社',
   nodes: [
     {
       name: '贾琏的资金来源异常',
@@ -138,3 +134,4 @@ describe('编译缓存', () => {
     expect(compileSchema(NodeSchema)).toBe(compileSchema(NodeSchema))
   })
 })
+

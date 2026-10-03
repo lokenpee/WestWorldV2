@@ -4,6 +4,7 @@ import tseslint from 'typescript-eslint'
 
 const CORE = 'src/core/**/*.{ts,tsx}'
 const FEATURES = 'src/features/**/*.{ts,tsx}'
+const QUERIES = 'src/queries/**/*.{ts,tsx}'
 
 export default tseslint.config(
   { ignores: ['dist/**', 'node_modules/**', 'coverage/**'] },
@@ -48,6 +49,19 @@ export default tseslint.config(
     },
   },
 
+  {
+    files: [QUERIES],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            { group: ['**/features/**', '@/features/**'], message: 'ADR-012: queries 不能依赖 features' },
+          ],
+        },
+      ],
+    },
+  },
   // ADR-012 第 3 条：features 不能直接依赖 db / llm
   {
     files: [FEATURES],
@@ -66,4 +80,5 @@ export default tseslint.config(
     },
   },
 )
+
 

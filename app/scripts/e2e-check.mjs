@@ -128,6 +128,28 @@ async function main() {
   check('自动选中已有书籍（不再退回导入页）', assetText.includes('人物') && assetText.includes('事件网络'))
   check('人物实体显示', assetText.includes('贾琏') && assetText.includes('P001'))
 
+  // 点一个人物 → 打开编辑抽屉
+  await evalJs(`[...document.querySelectorAll('li')].find(li => li.textContent.includes('P001'))?.click()`)
+  await sleep(500)
+  const detailText = await evalJs('document.body.textContent')
+  check('点人物打开编辑抽屉', detailText.includes('手动归并'))
+  check('编辑抽屉有字段', detailText.includes('主名') && detailText.includes('性格'))
+
+  // 改一个字段并保存 → 列表应当自动刷新
+  await evalJs(`(() => {
+    const inputs = [...document.querySelectorAll('input')];
+    const idx = inputs.findIndex(i => i.previousElementSibling?.textContent === '身份');
+    const target = idx >= 0 ? inputs[idx] : null;
+    if (!target) return 'no-input';
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(target, '荣国府长孙');
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    return 'ok';
+  })()`)
+  await sleep(200)
+  await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent === '保存')?.click()`)
+  await sleep(600)
+  check('保存后自动生效', (await evalJs('document.body.textContent')).includes('荣国府长孙'))
   // 切到「事件线」
   await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('事件线'))?.click()`)
   await sleep(400)
@@ -167,6 +189,7 @@ main().catch((e) => {
   chrome.kill()
   process.exit(1)
 })
+
 
 
 

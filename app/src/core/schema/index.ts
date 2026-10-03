@@ -7,5 +7,7 @@ export * from './node.ts'
 export * from './event-line.ts'
 export * from './extraction.ts'
 export * from './merge.ts'
+export * from './link.ts'
 export * from './validate.ts'
+
 

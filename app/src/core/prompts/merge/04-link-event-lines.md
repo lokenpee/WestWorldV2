@@ -53,48 +53,32 @@ stage: P2（每 100 章）与 P3（全书）通用
 - 已存在的事件线（含节点 id 与状态）
 - 可调用的工具：`query_nodes` / `query_event_lines` / `read_original`
 
-## 输出（严格 JSON）—— 只输出"操作"，不要重新描述全部数据
+## 输出（严格 JSON）—— 只输出「操作」，不要重新描述全部数据
 
-```json
-{
-  "event_line_ops": [
-    {
-      "op": "append",
-      "line_id": "L05",
-      "node_ids": ["C090-N03", "C120-N07"],
-      "cause": "……起因……",
-      "process": "……经过……",
-      "result": "……结果……",
-      "line_status": "open"
-    },
-    {
-      "op": "create",
-      "title": "贾赦父子走私案",
-      "node_ids": ["C037-N02", "C041-N05"],
-      "cause": "……",
-      "process": "……",
-      "result": "……",
-      "line_status": "closed"
-    }
-  ],
-  "new_nodes": [
-    {
-      "chapter_index": "90",
-      "name": "琪官儿进入忠顺王府",
-      "summary": "……",
-      "actors": ["琪官"],
-      "quote": "……原文……"
-    }
-  ]
-}
-```
+<!-- AUTO-GENERATED:START source=LinkEventLinesResultSchema -->
+<!-- 以下内容由 scripts/render-prompt-schema.ts 从 LinkEventLinesResultSchema 生成，勿手改 -->
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `event_line_ops` | object \\| object[] | ✅ | 对事件线的增量操作。空数组表示本批节点没有归属到任何线。 |
+| `new_nodes` | object[] | ✅ | 补断点时新建的节点。没有就返回空数组。 |
+| `new_nodes[].name` | string | ⬜ | 事件名称，客观描述，**不得是结论**。例：贾琏的资金来源异常 |
+| `new_nodes[].summary` | string | ⬜ | 事件概述，一到两句。 |
+| `new_nodes[].actors` | string[] | ⬜ | 行动者。用**本章原文的称呼**，还没归并。例：["贾琏"] |
+| `new_nodes[].targets` | string[] | ⬜ | 对象 / 承受者。例：["王熙凤"] |
+| `new_nodes[].world_delta` | string[] | ⬜ | 世界状态因此改变了什么。例：["贾琏手头多出大笔银子"] |
+| `new_nodes[].new_facts` | string[] | ⬜ | 新出现的信息。例：["贾琏近期有大笔来路不明的钱"] |
+| `new_nodes[].started_actions` | string[] | ⬜ | 谁开始了什么行动（尚未完成）。例：["贾琏开始变卖田产"] |
+| `new_nodes[].time_text` | string | ⬜ | 原文里的**明确**时间表述。可空。例：洪武十四年三月六日 / 亥时三刻 |
+| `new_nodes[].time_hint` | string | ⬜ | 原文里的**相对**时间表述。可空。例：次日 / 过了半月 |
+| `new_nodes[].quote` | string | ⬜ | 原文片段，用于回查校验。必须是原文里真实存在的句子。 |
+| `new_nodes[].offset` | number | ⬜ | 该片段在**本章正文**中的字符起点（从 0 开始）。拿不准就留空。 |
+<!-- AUTO-GENERATED:END -->
 
 **字段说明**：
 
 - `op` 只用 `append`（追加到已有线）或 `create`（新建线）
 - `line_status` 只用 `open` / `closed`
-- `new_nodes` 只在补断点、且原文里确实有依据时才填
-
+- `new_nodes` 只在补断点、且原文里确实有依据时才填（id 由代码分配，你不要编）
 ## 自检清单
 
 - [ ] 要建的线，是不是和已有的某条线是同一件事？（是的话应该用 `append`）
@@ -102,3 +86,4 @@ stage: P2（每 100 章）与 P3（全书）通用
 - [ ] 有没有把两条不相关的线硬合并？
 - [ ] 该属于多条线的节点，有没有只放进一条？
 - [ ] 我有没有把"缺了什么"写进输出？（不应该，应该直接补）
+

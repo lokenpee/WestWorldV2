@@ -33,7 +33,7 @@ function Stop({ onClick }: { onClick: (e: React.MouseEvent) => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="ml-auto text-xs text-neutral-400 hover:text-red-600"
+      className="text-xs text-neutral-400 hover:text-red-600"
     >
       删除
     </button>
@@ -336,5 +336,6 @@ export function AssetsPanel() {
     </div>
   )
 }
+
 
 

@@ -34,6 +34,7 @@ describe('提示词与 TypeBox schema 的一致性（ADR-011）', () => {
     const known = new Set([
       'AliasGroupsSchema',
       'LinkEventLinesResultSchema',
+      'MergedEntitySchema',
       'CharacterSnapshotSchema',
       'LocationSchema',
       'NodeSchema',
@@ -85,3 +86,4 @@ describe('提示词必须是「调工具」而不是「吐 JSON」', () => {
     expect(offenders).toEqual([])
   })
 })
+

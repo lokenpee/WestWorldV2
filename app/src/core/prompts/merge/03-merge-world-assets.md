@@ -63,43 +63,40 @@ stage: P2（每 100 章）/ P3（全书）
 
 ## 提交结果（必须调用工具）
 
-**你必须通过调用 `submit_result` 工具来提交结果**，不要用普通文本回复。
+**必须调用 `submit_result` 工具提交**，不要用普通文本回复。
 
-- 工具的**参数**就是要填的结构化数据（下面的字段表就是工具参数的字段）
-- 只调用一次工具；提交后不要再输出任何文字
-- 如果字段不确定，**留空**，不要编造
+<!-- AUTO-GENERATED:START source=MergedEntitySchema -->
+<!-- 以下内容由 scripts/render-prompt-schema.ts 从 MergedEntitySchema 生成，勿手改 -->
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `entity` | object | ✅ |  |
+| `entity.name` | string | ⬜ | 融合后的主名 |
+| `entity.aliases` | string[] | ⬜ | 所有已知称呼（不含主名） |
+| `entity.roleWeight` | "主要人物" \\| "重要配角" \\| "NPC" \\| "路人" | ⬜ | 人物层级。判定依据：① 剧情推动能力（有没有主动制造事件）② 因果影响范围 ③ 是否拥有自己的事件线 ④ 移除测试（删掉他，哪些重要事件会无法发生） |
+| `entity.identity` | string | ⬜ | 身份 / 职务 / 归属 |
+| `entity.profile` | object | ⬜ |  |
+| `entity.profile.age` | number | ⬜ |  |
+| `entity.profile.gender` | string | ⬜ |  |
+| `entity.appearance` | string | ⬜ | 外貌 |
+| `entity.personality` | string | ⬜ | 性格。多条用「；」分隔。**不得遗漏任何快照里的独有信息** |
+| `entity.background` | string | ⬜ | 背景 / 来历 |
+| `entity.speechStyleSample` | string | ⬜ | 原话片段（直接摘录，用于学这个人的说话味道） |
+| `entity.relations` | object[] | ⬜ | 融合后的关系列表 |
+| `entity.relations[].target` | string | ⬜ | 关系指向的人，用原文称呼 |
+| `entity.relations[].relationType` | string | ⬜ | 英文类型标记 |
+| `entity.relations[].relationLabel` | string | ⬜ | 中文说法 |
+| `entity.relations[].direction` | "bidirectional" \\| "directed" | ⬜ |  |
+| `merge_notes` | string[] | ✅ | 记录**无法融合的矛盾**（原文本身就冲突，或两次抽取结果冲突）。例：「C037 写瘦削，C041 写富态，已保留两说」。没有矛盾就返回空数组。 |
+<!-- AUTO-GENERATED:END -->
 
-### 工具参数的字段
-
-```json
-{
-  "entity": {
-    "name": "贾琏",
-    "aliases": ["琏二爷", "琏二哥哥"],
-    "roleWeight": "重要配角",
-    "identity": "荣国府长孙",
-    "profile": { "年龄": null, "性别": "男" },
-    "appearance": "……",
-    "personality": "好色；惧内；办事机灵",
-    "background": "……",
-    "speech_style_sample": "『……』",
-    "relations": [
-      { "target": "王熙凤", "relation_type": "spouse", "relation_label": "夫妻", "direction": "bidirectional" }
-    ]
-  },
-  "merge_notes": [
-    "C037-P03 与 C041-P01 的头像信息冲突：前者写『瘦削』，后者写『富态』，已保留两说"
-  ]
-}
-```
-
-**`merge_notes`** 用来记录**无法融合的矛盾**（原文本身就冲突，或两次抽取结果冲突）。这些会在预览页高亮给用户。
-
+**关于 `merge_notes`**：如果两个快照里的同一条信息**互相矛盾**（不是互补），
+不要硬调和成一句不准确的描述 —— 保留两说，并把冲突写进 `merge_notes`。
 ## 自检清单
 
 - [ ] 有没有丢失任何一个快照里独有的信息？
 - [ ] 有没有把矛盾信息强行"调和"成一句不准确的描述？（应该保留两说并记入 `merge_notes`）
 - [ ] `roleWeight` 的判定能说得出理由吗？
 - [ ] 有没有输出"字段补充N"这类键名？
+
 
 

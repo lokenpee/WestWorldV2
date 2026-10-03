@@ -20,6 +20,7 @@ import {
   CharacterSnapshotSchema,
   LinkEventLinesResultSchema,
   LocationSchema,
+  MergedEntitySchema,
   NarrativeAssetsExtractionSchema,
   NodeSchema,
   WorldAssetsExtractionSchema,
@@ -31,15 +32,14 @@ const ROOT = join(import.meta.dirname, '..')
 /** 提示词里可以引用的 schema（用名字引用，避免脆弱的路径解析）。 */
 const SCHEMA_REGISTRY: Record<string, TSchema> = {
   AliasGroupsSchema,
-  LinkEventLinesResultSchema,
   CharacterSnapshotSchema,
   LinkEventLinesResultSchema,
   LocationSchema,
+  MergedEntitySchema,
+  NarrativeAssetsExtractionSchema,
   NodeSchema,
   WorldAssetsExtractionSchema,
-  NarrativeAssetsExtractionSchema,
 }
-
 const MARKER_RE =
   /<!--\s*AUTO-GENERATED:START\s+source=(\w+)\s*-->([\s\S]*?)<!--\s*AUTO-GENERATED:END\s*-->\n*/g
 
@@ -263,6 +263,9 @@ function main(): void {
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop() ?? '')) {
   main()
 }
+
+
+
 
 
 

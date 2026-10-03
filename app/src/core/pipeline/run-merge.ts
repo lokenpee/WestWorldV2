@@ -10,12 +10,13 @@
  *   真正需要 `mergedInto` 重定向的是 P3 把 **两个已存在的实体** 再合到一起的情形。
  */
 import type { Character, StoredCharacterSnapshot } from '@/core/schema/index.ts'
-import { AliasGroupsSchema } from '@/core/schema/index.ts'
+import { AliasGroupsSchema, MergedEntitySchema } from '@/core/schema/index.ts'
 import { getCanonDb } from '@/core/db/canon.ts'
 import { listCharacterSnapshots } from '@/core/db/repo.ts'
 import { getEventBus, type EventBus } from '@/core/events/bus.ts'
 import { callModel } from '@/core/llm/call.ts'
 import { PROMPTS } from '@/core/prompts/index.ts'
+import { runPool } from './pool.ts'
 import {
   areNamesObviouslySame,
   groupSnapshots,
@@ -200,6 +201,78 @@ export async function runMerge(bookId: string, options: RunMergeOptions = {}): P
     }
   })
 
+  // ── ③.5 AI 字段级融合 ──
+  // 只有「多个快照并成一个实体」的组才需要融合 —— 单快照组直接用它自己，无需调模型。
+  const multiMember = characters.filter((c) => c.sourceSnapshotIds.length > 1)
+  if (useAi && multiMember.length > 0) {
+    bus.emit({ type: 'log', level: 'info', message: `  正在融合 ${multiMember.length} 组的字段（AI）…` })
+
+    await runPool(
+      multiMember,
+      3,
+      async (entity) => {
+        const members = entity.sourceSnapshotIds
+          .map((id) => byId.get(id))
+          .filter((s): s is StoredCharacterSnapshot => Boolean(s))
+        if (members.length < 2) return
+
+        const res = await call({
+          role: 'aggregation',
+          system: PROMPTS.mergeWorldAssets,
+          messages: [
+            {
+              role: 'user',
+              content: JSON.stringify({ snapshots: members }, null, 2),
+              timestamp: Date.now(),
+            },
+          ],
+          schema: MergedEntitySchema,
+          submitToolDescription: '提交融合后的人物档案。',
+          temperature: 0,
+          ...(signal ? { signal } : {}),
+        })
+        for (const u of res.attemptsUsage) cost += u.cost
+
+        if (!res.ok || !res.data) {
+          bus.emit({
+            type: 'log',
+            level: 'warn',
+            message: `  ${entity.name} 的字段融合失败（${res.errorKind ?? 'unknown'}），保留主快照的字段`,
+          })
+          return
+        }
+
+        const fused = res.data.entity
+        // ⚠️ 别名取**并集**而不是覆盖：分组阶段已经收集了可靠的别名，
+        // 模型的返回可能不全（覆盖会丢信息 —— 测试抓到过一次）。
+        const mergedAliases = [...new Set([...entity.aliases, ...(fused.aliases ?? [])])].filter(
+          (a) => a !== (fused.name || entity.name),
+        )
+
+        // 只覆盖内容字段；id / bookId / 来源引用仍由代码说了算
+        Object.assign(entity, {
+          name: fused.name || entity.name,
+          aliases: mergedAliases,
+          roleWeight: fused.roleWeight,
+          identity: fused.identity,
+          personality: fused.personality,
+          background: fused.background,
+          appearance: fused.appearance,
+          speechStyleSample: fused.speechStyleSample,
+          ...(fused.profile ? { profile: fused.profile } : {}),
+        })
+
+        if (res.data.merge_notes.length > 0) {
+          bus.emit({
+            type: 'log',
+            level: 'warn',
+            message: `  ${entity.name} 有 ${res.data.merge_notes.length} 处信息冲突（已保留两说）`,
+          })
+        }
+      },
+      signal,
+    )
+  }
   // ── ④ 落库（先清后写，保证重跑幂等）──
   const db = getCanonDb()
   await db.transaction('rw', db.characters, async () => {
@@ -231,3 +304,5 @@ export async function listCharacters(bookId: string): Promise<Character[]> {
 }
 
 export { areNamesObviouslySame }
+
+

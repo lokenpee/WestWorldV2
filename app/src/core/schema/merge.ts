@@ -30,3 +30,75 @@ export const AliasGroupsSchema = Type.Object(
 
 export type AliasGroups = Static<typeof AliasGroupsSchema>
 export type AliasGroup = Static<typeof AliasGroupSchema>
+
+/**
+ * AI 字段级融合的输出（提示词 03）。
+ *
+ * 与 AliasGroupsSchema 的分工：
+ *   AliasGroupsSchema —— **指出哪些名字是同一个人**（识别）
+ *   MergedEntitySchema —— **把同一个人的多份快照融合成一份档案**（融合）
+ *
+ * 这里不产出 id：怎么合、保留哪个 id 由代码决定（工程约定第 8 节）。
+ */
+export const MergedEntitySchema = Type.Object(
+  {
+    entity: Type.Object(
+      {
+        name: Type.String({ description: '融合后的主名' }),
+        aliases: Type.Array(Type.String(), { description: '所有已知称呼（不含主名）' }),
+        roleWeight: Type.Union(
+          [
+            Type.Literal('主要人物'),
+            Type.Literal('重要配角'),
+            Type.Literal('NPC'),
+            Type.Literal('路人'),
+          ],
+          {
+            description:
+              '人物层级。判定依据：① 剧情推动能力（有没有主动制造事件）② 因果影响范围 ③ 是否拥有自己的事件线 ④ 移除测试（删掉他，哪些重要事件会无法发生）',
+          },
+        ),
+        identity: Type.Optional(Type.String({ description: '身份 / 职务 / 归属' })),
+        profile: Type.Optional(
+          Type.Object(
+            {
+              age: Type.Optional(Type.Number()),
+              gender: Type.Optional(Type.String()),
+            },
+            { additionalProperties: false },
+          ),
+        ),
+        appearance: Type.Optional(Type.String({ description: '外貌' })),
+        personality: Type.Optional(
+          Type.String({ description: '性格。多条用「；」分隔。**不得遗漏任何快照里的独有信息**' }),
+        ),
+        background: Type.Optional(Type.String({ description: '背景 / 来历' })),
+        speechStyleSample: Type.Optional(
+          Type.String({ description: '原话片段（直接摘录，用于学这个人的说话味道）' }),
+        ),
+        relations: Type.Array(
+          Type.Object(
+            {
+              target: Type.String({ description: '关系指向的人，用原文称呼' }),
+              relationType: Type.String({ description: '英文类型标记' }),
+              relationLabel: Type.Optional(Type.String({ description: '中文说法' })),
+              direction: Type.Optional(
+                Type.Union([Type.Literal('bidirectional'), Type.Literal('directed')]),
+              ),
+            },
+            { additionalProperties: false },
+          ),
+          { description: '融合后的关系列表' },
+        ),
+      },
+      { additionalProperties: false },
+    ),
+    merge_notes: Type.Array(Type.String(), {
+      description:
+        '记录**无法融合的矛盾**（原文本身就冲突，或两次抽取结果冲突）。例：「C037 写瘦削，C041 写富态，已保留两说」。没有矛盾就返回空数组。',
+    }),
+  },
+  { additionalProperties: false, description: 'AI 字段级融合结果。' },
+)
+
+export type MergedEntity = Static<typeof MergedEntitySchema>

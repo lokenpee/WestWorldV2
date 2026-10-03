@@ -1,4 +1,5 @@
 export * from './common.ts'
+export * from './book.ts'
 export * from './character-snapshot.ts'
 export * from './location.ts'
 export * from './node.ts'

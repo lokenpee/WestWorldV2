@@ -87,6 +87,9 @@ export const StoredNodeSchema = Type.Composite(
       bookId: Type.String({ description: '所属书籍 id。' }),
       chapterIndex: Type.String({ description: '章节标识。' }),
       chapterName: Type.String({ description: '章节名。' }),
+      order: Type.Number({
+        description: '本章内的顺序，从 0 开始。用于按出现顺序展示与排序（比按 id 排序可靠）。',
+      }),
       createdBy: Type.Optional(
         Type.Union([Type.Literal('P1'), Type.Literal('P2')], {
           description: '节点来源。P1 = 章节提取；P2 = 聚合时补建。',
@@ -110,3 +113,4 @@ export const StoredNodeSchema = Type.Composite(
 )
 
 export type StoredNode = Static<typeof StoredNodeSchema>
+

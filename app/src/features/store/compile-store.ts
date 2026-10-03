@@ -18,6 +18,10 @@ interface CompileState {
   cost: number
   /** 实时日志（ADR-010：用户要能看到每一步在做什么） */
   logs: LogLine[]
+  /** 当前任务的 AbortController —— 取消按钮靠它真的中断任务 */
+  abortController: AbortController | null
+  beginRun: () => AbortSignal
+  cancelRun: () => void
   pushLog: (line: Omit<LogLine, 'id' | 'at'> & { at?: number }) => void
   clearLogs: () => void
   reset: () => void
@@ -40,7 +44,17 @@ export const useCompileStore = create<CompileState>((set, get) => ({
   failed: 0,
   cost: 0,
   logs: [],
+  abortController: null,
 
+  beginRun: () => {
+    const ac = new AbortController()
+    set({ abortController: ac, logs: [], status: 'running', completed: 0, failed: 0, cost: 0 })
+    return ac.signal
+  },
+
+  cancelRun: () => {
+    get().abortController?.abort()
+  },
   pushLog: (line) =>
     set((s) => {
       const next = [...s.logs, { id: ++logSeq, at: line.at ?? Date.now(), level: line.level, text: line.text }]
@@ -49,7 +63,7 @@ export const useCompileStore = create<CompileState>((set, get) => ({
 
   clearLogs: () => set({ logs: [] }),
 
-  reset: () => set({ status: 'idle', completed: 0, failed: 0, cost: 0, total: 0 }),
+  reset: () => set({ status: 'idle', completed: 0, failed: 0, cost: 0, total: 0, abortController: null }),
 
   /** 把事件总线上的一条事件折进界面状态（UI 只订阅总线，不直接碰 pipeline）。 */
   applyEvent: (e) => {
@@ -101,3 +115,5 @@ export const useCompileStore = create<CompileState>((set, get) => ({
     }
   },
 }))
+
+

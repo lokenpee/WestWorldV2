@@ -3,6 +3,7 @@ import { decodeBytes, decodeWith, type DecodeResult } from '@/core/pipeline/deco
 import { importBook } from '@/core/pipeline/import-book.ts'
 import { runAll } from '@/core/pipeline/run-all.ts'
 import { splitChapters, type ChapterDraft } from '@/core/pipeline/split-chapters.ts'
+import { useCompileStore } from '@/features/store/compile-store.ts'
 import { useUiStore } from '@/features/store/ui-store.ts'
 
 interface Preview {
@@ -19,6 +20,7 @@ interface Preview {
  */
 export function ImportPanel() {
   const setBookId = useUiStore((s) => s.setBookId)
+  const beginRun = useCompileStore((s) => s.beginRun)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -53,7 +55,8 @@ export function ImportPanel() {
       })
       setBookId(bookId)
       // 不 await：让 UI 立刻进入进度界面，编译在后台跑
-      void runAll(bookId)
+      const signal = beginRun()
+      void runAll(bookId, { signal })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -174,4 +177,5 @@ export function ImportPanel() {
     </div>
   )
 }
+
 

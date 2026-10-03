@@ -95,7 +95,7 @@ export function AssetsPanel() {
   return (
     <div className="flex h-full flex-col">
       {progress && progress.status !== 'idle' && (
-        <CompilePanel onCancel={() => setBookId(null)} />
+        <CompilePanel />
       )}
 
       <div className="flex items-center gap-1 border-b border-neutral-200 bg-white px-4">
@@ -325,3 +325,4 @@ export function AssetsPanel() {
     </div>
   )
 }
+

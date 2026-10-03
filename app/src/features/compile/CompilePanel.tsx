@@ -7,8 +7,8 @@ import { useCompileStore } from '@/features/store/compile-store.ts'
  * 用户要求："完完整整的日志窗口必须做，用户必须能看到到底每一步在做什么"。
  * 这里订阅 compileStore（它由事件总线喂），所以日志是**实时**的。
  */
-export function CompilePanel({ onCancel }: { onCancel: () => void }) {
-  const { status, stage, total, completed, failed, cost, logs } = useCompileStore()
+export function CompilePanel({ onCancel }: { onCancel?: () => void }) {
+  const { status, stage, total, completed, failed, cost, logs, cancelRun } = useCompileStore()
   const logRef = useRef<HTMLDivElement>(null)
 
   // 有新日志就滚到底
@@ -33,7 +33,10 @@ export function CompilePanel({ onCancel }: { onCancel: () => void }) {
         {running && (
           <button
             type="button"
-            onClick={onCancel}
+            onClick={() => {
+              cancelRun()
+              onCancel?.()
+            }}
             className="rounded border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-50"
           >
             取消
@@ -65,3 +68,4 @@ export function CompilePanel({ onCancel }: { onCancel: () => void }) {
     </div>
   )
 }
+

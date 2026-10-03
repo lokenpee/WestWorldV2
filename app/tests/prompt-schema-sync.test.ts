@@ -61,3 +61,27 @@ describe('提示词与 TypeBox schema 的一致性（ADR-011）', () => {
 })
 
 
+
+describe('提示词必须是「调工具」而不是「吐 JSON」', () => {
+  it('⭐ 每个有生成区的提示词都必须提到 submit_result', () => {
+    const offenders: string[] = []
+    for (const f of walk(PROMPTS_DIR)) {
+      const src = readFileSync(f, 'utf8')
+      if (!src.includes('AUTO-GENERATED:START')) continue
+      if (!src.includes('submit_result')) offenders.push(f.split(/[\\/]/).pop()!)
+    }
+    expect(
+      offenders,
+      `这些提示词没告诉模型要调用 submit_result 工具（会导致模型吐 JSON 文本、白花一轮钱）：${offenders.join(', ')}`,
+    ).toEqual([])
+  })
+
+  it('不再出现「输出严格 JSON」这类会误导模型的措辞', () => {
+    const offenders: string[] = []
+    for (const f of walk(PROMPTS_DIR)) {
+      const src = readFileSync(f, 'utf8')
+      if (/严格\s*JSON/.test(src)) offenders.push(f.split(/[\\/]/).pop()!)
+    }
+    expect(offenders).toEqual([])
+  })
+})

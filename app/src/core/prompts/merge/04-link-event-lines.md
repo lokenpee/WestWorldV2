@@ -53,7 +53,11 @@ stage: P2（每 100 章）与 P3（全书）通用
 - 已存在的事件线（含节点 id 与状态）
 - 可调用的工具：`query_nodes` / `query_event_lines` / `read_original`
 
-## 输出（严格 JSON）—— 只输出「操作」，不要重新描述全部数据
+## 提交结果（必须调用工具）
+
+**必须调用 `submit_result` 工具提交**，不要用普通文本回复。只输出「操作」，不要重新描述全部数据。
+
+### 工具参数的字段
 
 <!-- AUTO-GENERATED:START source=LinkEventLinesResultSchema -->
 <!-- 以下内容由 scripts/render-prompt-schema.ts 从 LinkEventLinesResultSchema 生成，勿手改 -->
@@ -86,4 +90,5 @@ stage: P2（每 100 章）与 P3（全书）通用
 - [ ] 有没有把两条不相关的线硬合并？
 - [ ] 该属于多条线的节点，有没有只放进一条？
 - [ ] 我有没有把"缺了什么"写进输出？（不应该，应该直接补）
+
 

@@ -16,6 +16,7 @@ import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import type { TSchema } from '@sinclair/typebox'
 import {
+  AliasGroupsSchema,
   CharacterSnapshotSchema,
   LocationSchema,
   NarrativeAssetsExtractionSchema,
@@ -28,6 +29,7 @@ const ROOT = join(import.meta.dirname, '..')
 
 /** 提示词里可以引用的 schema（用名字引用，避免脆弱的路径解析）。 */
 const SCHEMA_REGISTRY: Record<string, TSchema> = {
+  AliasGroupsSchema,
   CharacterSnapshotSchema,
   LocationSchema,
   NodeSchema,
@@ -258,3 +260,4 @@ function main(): void {
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/').split('/').pop() ?? '')) {
   main()
 }
+

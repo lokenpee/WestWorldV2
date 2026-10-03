@@ -6,7 +6,9 @@ import {
   BookSchema,
   ChapterSchema,
   ChapterTextSchema,
+  CharacterSchema,
   CompileProgressSchema,
+  EventLineSchema,
   StoredCharacterSnapshotSchema,
   StoredLocationSchema,
   StoredNodeSchema,
@@ -18,8 +20,10 @@ const SCHEMA_BY_STORE: Record<CanonStoreName, TSchema> = {
   chapters: ChapterSchema,
   chapterTexts: ChapterTextSchema,
   characterSnapshots: StoredCharacterSnapshotSchema,
+  characters: CharacterSchema,
   locations: StoredLocationSchema,
   nodes: StoredNodeSchema,
+  eventLines: EventLineSchema,
   compileProgress: CompileProgressSchema,
 }
 
@@ -152,4 +156,5 @@ describe('Canon 库：读写', () => {
     expect((await db.books.get('bk_009'))?.title).toBe('持久化测试')
   })
 })
+
 

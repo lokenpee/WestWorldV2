@@ -12,7 +12,12 @@
  */
 export const CANON_DB_NAME = 'westworld_canon'
 
-export const CANON_VERSION = 1
+/**
+ * 版本历史（ADR-014：改声明必须升版本）：
+ *   v1  初始：books / chapters / chapterTexts / characterSnapshots / locations / nodes / compileProgress
+ *   v2  加入 P2/P3 产物：characters（人物实体）、eventLines（事件线）
+ */
+export const CANON_VERSION = 2
 
 export const CANON_STORES = {
   /** 一本书 */
@@ -27,11 +32,17 @@ export const CANON_STORES = {
   /** 人物快照（P1 产出，未归并） */
   characterSnapshots: 'id, bookId, [bookId+chapterIndex]',
 
+  /** 人物实体（P2/P3 合并产物） */
+  characters: 'id, bookId, [bookId+name], roleWeight',
+
   /** 地点 */
   locations: 'id, bookId, [bookId+name]',
 
   /** 事件节点 */
   nodes: 'id, bookId, [bookId+chapterIndex], [bookId+order]',
+
+  /** 事件线（P2/P3 聚合产物） */
+  eventLines: 'id, bookId, [bookId+title], lineStatus',
 
   /** 编译进度（断点续跑的唯一依据，ADR-008） */
   compileProgress: '[bookId+stage], bookId',

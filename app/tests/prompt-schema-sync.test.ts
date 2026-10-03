@@ -32,6 +32,7 @@ describe('提示词与 TypeBox schema 的一致性（ADR-011）', () => {
 
   it('每个生成区都引用了已注册的 schema 名', () => {
     const known = new Set([
+      'AliasGroupsSchema',
       'CharacterSnapshotSchema',
       'LocationSchema',
       'NodeSchema',
@@ -57,3 +58,4 @@ describe('提示词与 TypeBox schema 的一致性（ADR-011）', () => {
     expect(readFileSync(p1a, 'utf8')).toContain('勿手改')
   })
 })
+

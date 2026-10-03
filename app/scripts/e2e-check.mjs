@@ -7,7 +7,7 @@
  * 用法：node scripts/e2e-check.mjs http://localhost:5201/
  */
 import { spawn } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -15,6 +15,7 @@ const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
 const URL = process.argv[2] ?? 'http://localhost:5201/'
 // 用随机端口：固定端口会被上一次没杀干净的 Chrome 占用，导致连到旧实例
 const PORT = 9400 + Math.floor(Math.random() * 500)
+const SHOT_DIR = process.argv[3] ?? null
 
 const profile = mkdtempSync(join(tmpdir(), 'ww-e2e-'))
 const chrome = spawn(
@@ -81,18 +82,42 @@ const SEED = `
   })
   const tx = db.transaction(['books','characters','eventLines','nodes'], 'readwrite')
   tx.objectStore('books').put({ id: 'bk_e2e', title: 'E2E 测试书', createdAt: new Date().toISOString() })
-  tx.objectStore('characters').put({
-    id: 'P001', bookId: 'bk_e2e', name: '贾琏', aliases: ['琏二爷'], roleWeight: 'NPC',
-    relations: [], sourceSnapshotIds: ['C1-P001'], updatedAt: ''
+
+  const chars = [
+    { id: 'P001', name: '贾琏', aliases: ['琏二爷'], roleWeight: '重要配角', identity: '荣国府长孙' },
+    { id: 'P002', name: '贾赦', aliases: [], roleWeight: '重要配角', identity: '荣国府长子' },
+    { id: 'P003', name: '琪官', aliases: ['蒋玉菡'], roleWeight: 'NPC', identity: '戏子' },
+  ]
+  for (const c of chars) {
+    tx.objectStore('characters').put({
+      ...c, bookId: 'bk_e2e', relations: [], sourceSnapshotIds: ['C1-P001'], updatedAt: ''
+    })
+  }
+
+  const nodes = [
+    ['C1-N001', '1', '资金异常', '贾琏手头忽然宽裕', ['贾琏']],
+    ['C4-N001', '4', '贾赦的走私迹象', '田产被悄悄变卖', ['贾赦']],
+    ['C9-N001', '9', '琪官逃跑', '琪官从忠顺王府逃出', ['琪官']],
+    ['C12-N001', '12', '琪官举报', '琪官供出走私链条', ['琪官', '贾赦']],
+    ['C20-N001', '20', '贾母求情', '贾母进宫求情', ['贾母']],
+  ]
+  nodes.forEach(([id, ch, name, summary, actors], i) => {
+    tx.objectStore('nodes').put({
+      id, bookId: 'bk_e2e', chapterIndex: ch, chapterName: '第' + ch + '章', order: i,
+      name, summary, actors, quote: '……原文……', confidence: 0.9, createdBy: 'P1', eventLineIds: []
+    })
   })
-  tx.objectStore('nodes').put({
-    id: 'C1-N001', bookId: 'bk_e2e', chapterIndex: '1', chapterName: '第一章', order: 0,
-    name: '资金异常', summary: '手头宽裕', actors: ['贾琏'], quote: '……', confidence: 0.9, createdBy: 'P1'
-  })
-  tx.objectStore('eventLines').put({
-    id: 'L01', bookId: 'bk_e2e', title: '走私案', nodeIds: ['C1-N001'], chapters: ['1'],
-    cause: '起', process: '经', result: '果', lineStatus: 'open', characterIds: ['P001'], updatedAt: ''
-  })
+
+  const lines = [
+    { id: 'L01', title: '贾赦父子走私案', nodeIds: ['C1-N001','C4-N001','C12-N001','C20-N001'], chapters: ['1','4','12','20'], characterIds: ['P001','P002'] },
+    { id: 'L02', title: '琪官儿事件', nodeIds: ['C9-N001','C12-N001'], chapters: ['9','12'], characterIds: ['P003'] },
+  ]
+  for (const l of lines) {
+    tx.objectStore('eventLines').put({
+      ...l, bookId: 'bk_e2e', cause: '起因一句话', process: '经过一句话', result: '结果一句话',
+      lineStatus: 'open', updatedAt: ''
+    })
+  }
   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error) })
   db.close()
   return 'seeded'
@@ -105,6 +130,10 @@ async function main() {
   const send = makeSend(ws)
 
   await send('Page.enable')
+  // 用大视口，截图才能反映真实桌面布局
+  await send('Emulation.setDeviceMetricsOverride', {
+    width: 1440, height: 900, deviceScaleFactor: 1, mobile: false,
+  })
   await send('Runtime.enable')
   await send('Page.navigate', { url: URL })
   await sleep(1500)
@@ -115,6 +144,12 @@ async function main() {
     return r.result.value
   }
 
+  async function shot(name) {
+    if (!SHOT_DIR) return
+    const r = await send('Page.captureScreenshot', { format: 'png' })
+    mkdirSync(SHOT_DIR, { recursive: true })
+    writeFileSync(join(SHOT_DIR, `${name}.png`), Buffer.from(r.data, 'base64'))
+  }
   const results = []
   const check = (step, ok) => results.push({ step, ok })
 
@@ -125,6 +160,7 @@ async function main() {
   await send('Page.reload')
   await sleep(1800)
   const assetText = await evalJs('document.body.textContent')
+  await shot('01-assets')
   check('自动选中已有书籍（不再退回导入页）', assetText.includes('人物') && assetText.includes('事件网络'))
   check('人物实体显示', assetText.includes('贾琏') && assetText.includes('P001'))
 
@@ -132,6 +168,7 @@ async function main() {
   await evalJs(`[...document.querySelectorAll('li')].find(li => li.textContent.includes('P001'))?.click()`)
   await sleep(500)
   const detailText = await evalJs('document.body.textContent')
+  await shot('05-edit')
   check('点人物打开编辑抽屉', detailText.includes('手动归并'))
   check('编辑抽屉有字段', detailText.includes('主名') && detailText.includes('性格'))
 
@@ -157,13 +194,14 @@ async function main() {
   await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('事件线'))?.click()`)
   await sleep(400)
   const lineText = await evalJs('document.body.textContent')
-  check('事件线显示（含起因经过结果）', lineText.includes('走私案') && lineText.includes('起因'))
+  check('事件线显示（含起因经过结果）', lineText.includes('贾赦父子走私案') && lineText.includes('起因'))
 
   // 切到「事件网络」—— React Flow 应当挂载
   await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('事件网络'))?.click()`)
   await sleep(900)
   const netText = await evalJs('document.body.textContent')
   const hasFlow = await evalJs(`!!document.querySelector('.react-flow')`)
+  await shot('02-network')
   check('事件网络渲染（React Flow 挂载）', hasFlow)
   check('网络图例显示', netText.includes('双击一条线'))
 
@@ -171,12 +209,14 @@ async function main() {
   await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent === '设置')?.click()`)
   await sleep(400)
   const settingsText = await evalJs('document.body.textContent')
+  await shot('03-settings')
   check('设置界面（含 API Key 与明文告知）', settingsText.includes('API Key') && settingsText.includes('明文保存在本机浏览器存储'))
   check('设置界面有备份导出/导入', settingsText.includes('导出备份') && settingsText.includes('导入备份'))
   check('备份说明写清「不含 API Key」', settingsText.includes('不包含 API Key'))
 
   await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent === '游玩')?.click()`)
   await sleep(400)
+  await shot('04-play')
   check('游玩界面', (await evalJs('document.body.textContent')).includes('还没有开始游玩'))
 
   console.log('检查项：')
@@ -194,6 +234,10 @@ main().catch((e) => {
   chrome.kill()
   process.exit(1)
 })
+
+
+
+
 
 
 

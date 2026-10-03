@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import {
   Background,
   Controls,
-  MiniMap,
+  Position,
   ReactFlow,
   type Edge,
   type Node,
@@ -37,6 +37,9 @@ function toFlow(graph: NetworkGraph): { nodes: Node[]; edges: Edge[] } {
     return {
       id: n.id,
       position: { x: pos.x, y: pos.y },
+      // dagre 是从左到右布局的，连接点也必须左进右出，否则边会绕一大圈（S 形）
+      sourcePosition: Position.Right,
+      targetPosition: Position.Left,
       data: {
         label: (
           <div className="text-left">
@@ -78,7 +81,7 @@ function toFlow(graph: NetworkGraph): { nodes: Node[]; edges: Edge[] } {
     id: e.id,
     source: e.source,
     target: e.target,
-    type: 'smoothstep',
+    type: 'default',
     animated: e.kind !== 'contains',
     style: { stroke: EDGE_COLORS[e.kind] ?? '#94a3b8', strokeWidth: e.kind === 'contains' ? 1.5 : 1 },
   }))
@@ -175,8 +178,10 @@ export function NetworkPanel({ lines, nodes }: NetworkPanelProps) {
       >
         <Background />
         <Controls />
-        <MiniMap pannable zoomable />
       </ReactFlow>
     </div>
   )
 }
+
+
+

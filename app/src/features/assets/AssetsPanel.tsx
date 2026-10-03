@@ -134,13 +134,6 @@ export function AssetsPanel() {
           </button>
           <button
             type="button"
-            onClick={() => setTrying(true)}
-            className="rounded border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-50"
-          >
-            试跑一章
-          </button>
-          <button
-            type="button"
             disabled={rerunning}
             onClick={async () => {
               setRerunning(true)

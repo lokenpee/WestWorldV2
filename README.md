@@ -35,6 +35,10 @@ WestWorldV2/
 └── *.md                        ← 原始 idea 与评审报告
 ```
 
+## 想直接用？看这个
+
+👉 **[docs/使用说明.md](docs/使用说明.md)** —— 从配 API Key 到看事件网络的完整流程
+
 ## 文档优先级（写代码前按顺序读）
 
 1. **`docs/engineering-conventions.md`** —— 技术栈、分章正则、并发、提示词组织
@@ -79,3 +83,4 @@ pnpm build
 ## License
 
 MIT
+

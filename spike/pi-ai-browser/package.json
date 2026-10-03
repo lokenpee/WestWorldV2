@@ -1,0 +1,11 @@
+{
+  "name": "pi-ai-browser-spike",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "comment": "THROWAWAY SPIKE - 验证 pi-ai 能否在浏览器运行，验证完可删",
+  "dependencies": {
+    "@earendil-works/pi-ai": "^1.0.1",
+    "vite": "^8.3.2"
+  }
+}

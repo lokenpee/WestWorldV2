@@ -48,30 +48,31 @@ decision-makers: <谁拥有这个决定>
 ## 目标仓库结构（Implementation Plan 里的路径都以此为准）
 
 ```
-westworld-v2/
-├── src-tauri/                 # Tauri 主进程（Rust 外壳）
-├── src/
-│   ├── core/                  # 与 UI 无关的核心逻辑，可单测
-│   │   ├── schema/            # TypeBox schema —— 单一真相源（ADR-003）
-│   │   ├── db/                # Dexie 数据层（ADR-002）
-│   │   ├── llm/               # 模型调用抽象层（ADR-004）
-│   │   ├── pipeline/          # P1 / P2 / P2' / P3 编排
-│   │   ├── tools/             # Agent 工具接口
-│   │   └── prompts/           # 提示词模板
-│   ├── workers/               # Web Worker（长任务）
-│   ├── features/              # UI 功能模块
-│   │   ├── import/            # 导入与分章
-│   │   ├── assets/            # 人物 / 地点 / 事件预览
-│   │   └── map/               # 事件地图
-│   ├── shared/
-│   └── main.tsx
+WestWorldV2/
+├── app/                       # 应用本体（用户已定：代码放这里）
+│   ├── src/
+│   │   ├── core/              # 与 UI 无关的核心逻辑，可单测（禁止 import React / DOM）
+│   │   │   ├── schema/        # TypeBox schema —— 业务数据唯一真相源（ADR-003）
+│   │   │   ├── db/            # Dexie：stores / canon（每本书一个库）/ settings（ADR-002）
+│   │   │   ├── llm/           # 模型调用抽象层（ADR-004）
+│   │   │   ├── pipeline/      # P1 / P2 / P3 编排 + publish（入库，ADR-018）
+│   │   │   ├── assets/        # 草稿层编辑（改快照 / 合并 / 删除）
+│   │   │   ├── graph/         # 事件网络构图 + 布局（ADR-015）
+│   │   │   ├── events/        # 事件总线（进度 / 日志，ADR-010）
+│   │   │   ├── export/        # .wwv2 导出 / 导入（ADR-013）
+│   │   │   └── prompts/       # 提示词模板（字段表由 schema 生成，ADR-011）
+│   │   ├── queries/           # useLiveQuery 订阅层（UI 只从这里读数据，ADR-012）
+│   │   └── features/          # UI：app-shell / import / compile / assets / network / settings / play
+│   ├── tests/                 # Vitest
+│   └── scripts/               # render-prompt-schema / e2e-check
 ├── docs/
 │   ├── adr/                   # 本目录
-│   └── specs/                 # 设计规格
-└── tests/
+│   ├── plans/                 # 实施计划（历史记录，以 ADR 与代码为准）
+│   └── specs/                 # 设计规格（暂未建；字段以 schema 为准）
+└── PRD-WestWorldV2.md
 ```
 
-> ⚠️ 代码实际放在 E:\WestWorldV2\app\（用户已定）。上面的 src/ 与 pp/src/ 是同一棵树。
+> **没有 Rust 外壳、没有本地服务进程** —— 纯浏览器 SPA（ADR-001）。代码在 E:\WestWorldV2\app。
 
 ---
 

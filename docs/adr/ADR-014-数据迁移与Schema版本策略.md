@@ -19,15 +19,26 @@ decision-makers: 用户（产品负责人）
 ### 1. 一切 schema 变更都走 Dexie 版本化迁移
 
 ```typescript
-// app/src/core/db/canon.ts
-db.version(1).stores({ characters: 'id, name, roleWeight', nodes: 'id, chapter_index' });
+// app/src/core/db/settings.ts —— 真实例子：v1 只有凭据与设置，v2 加书架
+export const SETTINGS_VERSION = 2
 
-db.version(2)
-  .stores({ characters: 'id, name, roleWeight, aliases', nodes: 'id, chapter_index, time_coord' })
-  .upgrade(tx => tx.table('characters').toCollection().modify(c => { c.aliases ??= []; }));
+this.version(1).stores({ credentials: 'providerId', appSettings: 'key' })
+this.version(2).stores({ ...SETTINGS_STORES })   // + books: 'id, createdAt'
+
+// app/src/core/db/canon.ts —— 每本书一个库，从 v1 开始
+export class CanonDatabase extends Dexie {
+  constructor(bookId: string) {
+    super(CANON_DB_PREFIX + bookId)
+    this.version(1).stores({ ...CANON_STORES })
+  }
+}
 ```
 
 **规则**：每次改动 `stores()` 声明或数据结构 → **版本号 +1 + 写 upgrade 函数**。不允许"改了声明不升版本"。
+
+**⚠️ 分库带来的额外注意点**：Canon 库是**每本书一个**，但应用代码只有一份。
+所以改 Canon 库的表结构时，**所有已存在的书都要能升级** —— 版本号只在 `stores.ts` / `canon.ts` 里写一次，
+不允许出现"这本书的库是 v1、那本书的库是 v2"的分叉。
 
 ### 2. 哪些变更需要迁移
 
@@ -44,14 +55,18 @@ db.version(2)
 
 ```
 可重生成数据（Canon 层）           不可重生成数据（世界线层）
-  · 人物实体                          · 玩家做过的选择
-  · 地点                              · 世界状态
-  · 事件节点                          · 变更账本
-  · 事件线                            · 快照
-  · 时间轴
+  · 人物 / 地点快照（草稿层）          · 玩家做过的选择
+  · 事件节点                          · 世界状态
+  · 事件线                            · 变更账本
+  · 时间轴                            · 快照
   · 原文
+  · 入库后的资产包（characters / locations）
        ↓                                    ↓
   重新跑一次 P1/P2/P3 就有              丢了就真的没了
+
+> ⚠️ **资产包里可能有用户的手工编辑**（改过的名字、层级，手动删掉的人物）。
+> "重新编译"能拿回**结构**，但拿不回**手工修改** —— 所以资产包**不算纯粹的可重生成数据**。
+> 迁移失败时优先提示「从备份恢复」，而不是直接重建。
 ```
 
 **迁移策略按类型区分**：

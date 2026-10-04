@@ -26,7 +26,10 @@ export const EventLineSchema = Type.Object(
     process: Type.String({ description: '经过' }),
     result: Type.String({ description: '结果' }),
     lineStatus: LineStatusSchema,
-    characterIds: Type.Array(Type.String(), { description: '涉及人物实体 id（代码汇总）' }),
+    characterIds: Type.Array(Type.String(), {
+      description:
+        '涉及人物。draft 阶段为空；**入库时由代码**把成员节点的 actors 映射成人物实体 id 后写入。重新入库会整体重算。',
+    }),
     updatedAt: Type.String({ description: 'ISO 8601' }),
   },
   { additionalProperties: false, description: '事件线（P2/P3 聚合产物）' },

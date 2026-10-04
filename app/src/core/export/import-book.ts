@@ -4,9 +4,12 @@
  * 两条硬规则：
  *   ① **先全部校验，再写库** —— 不要写了一半才发现文件坏了（会在库里留半本书）
  *   ② **默认新建一本书**，不覆盖现有的 —— 导入的典型场景是"恢复备份"
+ *
+ * 分库后：新书 = 设置库里一条书架记录 + 一个新的 `westworld_canon_{bookId}` 库。
  */
 import { unzipSync, strFromU8 } from 'fflate'
 import { getCanonDb } from '@/core/db/canon.ts'
+import { createBook } from '@/core/db/repo.ts'
 import type {
   Book,
   Chapter,
@@ -16,6 +19,7 @@ import type {
   EventLine,
   StoredCharacterSnapshot,
   StoredLocation,
+  StoredLocationSnapshot,
   StoredNode,
 } from '@/core/schema/index.ts'
 import {
@@ -120,14 +124,21 @@ export async function importBackup(bytes: Uint8Array): Promise<ImportResult> {
   const manifest = inspect.manifest
   const newBookId = `bk_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
 
-  const book = JSON.parse(strFromU8(files['data/book.json']!)) as Book
-  const chapters = JSON.parse(strFromU8(files['data/chapters.json']!)) as Chapter[]
-  const snapshots = JSON.parse(strFromU8(files['data/characterSnapshots.json']!)) as StoredCharacterSnapshot[]
-  const characters = JSON.parse(strFromU8(files['data/characters.json']!)) as Character[]
-  const locations = JSON.parse(strFromU8(files['data/locations.json']!)) as StoredLocation[]
-  const nodes = JSON.parse(strFromU8(files['data/nodes.json']!)) as StoredNode[]
-  const eventLines = JSON.parse(strFromU8(files['data/eventLines.json']!)) as EventLine[]
-  const progress = JSON.parse(strFromU8(files['data/compileProgress.json']!)) as CompileProgress[]
+  const readJson = <T>(path: string, fallback: T): T => {
+    const file = files[path]
+    if (!file) return fallback
+    return JSON.parse(strFromU8(file)) as T
+  }
+
+  const book = readJson<Book | null>('data/book.json', null)
+  const chapters = readJson<Chapter[]>('data/chapters.json', [])
+  const snapshots = readJson<StoredCharacterSnapshot[]>('data/characterSnapshots.json', [])
+  const locationSnapshots = readJson<StoredLocationSnapshot[]>('data/locationSnapshots.json', [])
+  const characters = readJson<Character[]>('data/characters.json', [])
+  const locations = readJson<StoredLocation[]>('data/locations.json', [])
+  const nodes = readJson<StoredNode[]>('data/nodes.json', [])
+  const eventLines = readJson<EventLine[]>('data/eventLines.json', [])
+  const progress = readJson<CompileProgress[]>('data/compileProgress.json', [])
 
   // 全部换成本书的新 id —— 不改动任何已有数据
   const remap = <T extends { bookId: string }>(rows: T[]): T[] =>
@@ -135,23 +146,32 @@ export async function importBackup(bytes: Uint8Array): Promise<ImportResult> {
 
   const texts: ChapterText[] = []
   for (const chapter of chapters) {
-    const path = `chapters/${Object.keys(manifest.checksums).find((k) => parseChapterFileName(k.replace('chapters/', '')) === chapter.chapterIndex)?.replace('chapters/', '') ?? ''}`
-    const file = files[path]
+    const fileName = Object.keys(manifest.checksums)
+      .filter((k) => k.startsWith('chapters/'))
+      .map((k) => k.replace('chapters/', ''))
+      .find((name) => parseChapterFileName(name) === chapter.chapterIndex)
+    const file = fileName ? files[`chapters/${fileName}`] : undefined
     if (file) texts.push({ bookId: newBookId, chapterIndex: chapter.chapterIndex, text: strFromU8(file) })
   }
 
-  // 节点/事件线里的引用（事件线 id 不变，节点 id 不变，只换 bookId）
-  const newBook: Book = { ...book, id: newBookId, title: `${book.title}（导入）` }
+  // 书架记录进设置库（跨书全局信息），正文与资产进新 Canon 库
+  const originalTitle = book?.title ?? manifest.book.title
+  await createBook({
+    id: newBookId,
+    title: `${originalTitle}（导入）`,
+    ...(book?.author ? { author: book.author } : {}),
+    ...(book?.sourceFileName ? { sourceFileName: book.sourceFileName } : {}),
+  })
 
-  const db = getCanonDb()
+  const db = getCanonDb(newBookId)
   await db.transaction(
     'rw',
-    [db.books, db.chapters, db.chapterTexts, db.characterSnapshots, db.characters, db.locations, db.nodes, db.eventLines, db.compileProgress],
+    [db.chapters, db.chapterTexts, db.characterSnapshots, db.locationSnapshots, db.characters, db.locations, db.nodes, db.eventLines, db.compileProgress],
     async () => {
-      await db.books.put(newBook)
       if (chapters.length) await db.chapters.bulkPut(remap(chapters))
       if (texts.length) await db.chapterTexts.bulkPut(texts)
       if (snapshots.length) await db.characterSnapshots.bulkPut(remap(snapshots))
+      if (locationSnapshots.length) await db.locationSnapshots.bulkPut(remap(locationSnapshots))
       if (characters.length) await db.characters.bulkPut(remap(characters))
       if (locations.length) await db.locations.bulkPut(remap(locations))
       if (nodes.length) await db.nodes.bulkPut(remap(nodes))

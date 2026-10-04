@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox'
 import { ConfidenceSchema, RelationSchema } from './common.ts'
+import { RoleWeightSchema } from './character.ts'
 
 /**
  * 人物快照 —— P1 的产出。
@@ -64,13 +65,18 @@ export const StoredCharacterSnapshotSchema = Type.Composite(
         description: '章节标识。字符串以支持切块，例："37" 或 "101.1"。',
       }),
       chapterName: Type.String({ description: '导入预处理后的章节名。' }),
-      entityId: Type.Optional(
-        Type.String({ description: '归并后指向的人物实体 id，例：P001。归并前为空。' }),
+      /** 合并阶段填上：这个人的所有已知称呼（含被合并掉的那些快照里的） */
+      aliases: Type.Optional(
+        Type.Array(Type.String(), { description: '合并后的别名列表。例：["琏二爷", "琏二哥哥"]' }),
       ),
+      /** 合并阶段填上，用户可改 */
+      roleWeight: Type.Optional(RoleWeightSchema),
+      updatedAt: Type.Optional(Type.String({ description: '最后一次编辑时间' })),
     }),
   ],
   { description: '已落库的人物快照。' },
 )
 
 export type StoredCharacterSnapshot = Static<typeof StoredCharacterSnapshotSchema>
+
 

@@ -6,7 +6,7 @@
  *   ② **只输出操作**（append / create）—— 天然实现「能续就续，不要新建」
  *   ③ **派生字段由代码算**（chapters / timeRange / characterIds）—— 不让模型编
  */
-import type { Character, EventLine, EventLineOp, StoredNode } from '@/core/schema/index.ts'
+import type { EventLine, EventLineOp, StoredNode } from '@/core/schema/index.ts'
 import { LinkEventLinesResultSchema } from '@/core/schema/index.ts'
 import { getCanonDb } from '@/core/db/canon.ts'
 import { listNodes } from '@/core/db/repo.ts'
@@ -89,33 +89,13 @@ export function deriveLineFields(
   return { chapters: sortedChapters, timeRange: [times[0]!, times[times.length - 1]!] }
 }
 
-/** 把节点的 actors（原文称呼）解析成人物实体 id。 */
-export function resolveCharacterIds(nodeIds: string[], nodeById: Map<string, StoredNode>, chars: Character[]): string[] {
-  const nameToId = new Map<string, string>()
-  for (const c of chars) {
-    nameToId.set(c.name, c.id)
-    for (const a of c.aliases) nameToId.set(a, c.id)
-  }
-  const out = new Set<string>()
-  for (const id of nodeIds) {
-    const n = nodeById.get(id)
-    if (!n) continue
-    for (const actor of n.actors) {
-      const cid = nameToId.get(actor)
-      if (cid) out.add(cid)
-    }
-  }
-  return [...out]
-}
-
 export async function runLink(bookId: string, options: RunLinkOptions = {}): Promise<RunLinkResult> {
   const { signal, deps = {}, bus = getEventBus(), batchSize = DEFAULT_BATCH_SIZE } = options
   const call = deps.call ?? callModel
 
-  const db = getCanonDb()
+  const db = getCanonDb(bookId)
   const nodes = await listNodes(bookId)
-  const existingLines = await db.eventLines.where('bookId').equals(bookId).toArray()
-  const characters = await db.characters.where('bookId').equals(bookId).toArray()
+  const existingLines = await db.eventLines.toArray()
 
   bus.emit({ type: 'task:start', bookId, stage: 'P3', total: 1 })
 
@@ -176,7 +156,7 @@ export async function runLink(bookId: string, options: RunLinkOptions = {}): Pro
           process: op.process,
           result: op.result,
           lineStatus: op.line_status,
-          characterIds: resolveCharacterIds(merged, nodeById, characters),
+          characterIds: [],
           updatedAt: new Date().toISOString(),
         })
       } else {
@@ -209,7 +189,7 @@ export async function runLink(bookId: string, options: RunLinkOptions = {}): Pro
           process: op.process,
           result: op.result,
           lineStatus: op.line_status,
-          characterIds: resolveCharacterIds(op.node_ids, nodeById, characters),
+          characterIds: [],
           updatedAt: new Date().toISOString(),
         })
       }
@@ -226,7 +206,7 @@ export async function runLink(bookId: string, options: RunLinkOptions = {}): Pro
 
   // 落库（先清后写，重跑幂等）+ 回填节点的 eventLineIds
   await db.transaction('rw', db.eventLines, db.nodes, async () => {
-    await db.eventLines.where('bookId').equals(bookId).delete()
+    await db.eventLines.clear()
     if (lines.length) await db.eventLines.bulkPut(lines)
 
     const nodeToLines = new Map<string, string[]>()

@@ -19,7 +19,7 @@ const worldOk: CallModelResult<unknown> = {
       { name: '琪官', confidence: 0.8 },
       { name: '贾琏', confidence: 0.5 }, // 重复，应被去重
     ],
-    locations: [{ name: '荣国府', description: '贾府主宅' }, { name: '荣国府' }],
+    locations: [{ name: '荣国府', description: '贾府主宅', confidence: 0.9 }, { name: '荣国府', confidence: 0.6 }],
   },
   stopReason: 'stop',
   usage,
@@ -70,7 +70,7 @@ describe('P1：正常提取', () => {
     })
     expect(r.failures).toEqual([])
     expect(r.characterSnapshots).toHaveLength(2)
-    expect(r.locations).toHaveLength(1)
+    expect(r.locationSnapshots).toHaveLength(1)
     expect(r.nodes).toHaveLength(2)
   })
 
@@ -80,7 +80,7 @@ describe('P1：正常提取', () => {
     })
     expect(r.characterSnapshots.map((c) => c.id)).toEqual(['C37-P001', 'C37-P002'])
     expect(r.nodes.map((n) => n.id)).toEqual(['C37-N001', 'C37-N002'])
-    expect(r.locations.map((l) => l.id)).toEqual(['L001'])
+    expect(r.locationSnapshots.map((l) => l.id)).toEqual(['C37-L001'])
   })
 
   it('记录挂上了归属信息', async () => {
@@ -101,7 +101,7 @@ describe('P1：正常提取', () => {
       call: makeCall({ world: worldOk, narrative: narrativeOk }) as never,
     })
     expect(r.characterSnapshots.map((c) => c.name)).toEqual(['贾琏', '琪官'])
-    expect(r.locations.map((l) => l.name)).toEqual(['荣国府'])
+    expect(r.locationSnapshots.map((l) => l.name)).toEqual(['荣国府'])
   })
 
   it('两次调用的用量都被收集（成本统计）', async () => {

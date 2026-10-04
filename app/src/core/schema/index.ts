@@ -2,12 +2,10 @@ export * from './common.ts'
 export * from './book.ts'
 export * from './character-snapshot.ts'
 export * from './character.ts'
-export * from './location.ts'
+export * from './location-snapshot.ts'
 export * from './node.ts'
 export * from './event-line.ts'
 export * from './extraction.ts'
 export * from './merge.ts'
 export * from './link.ts'
 export * from './validate.ts'
-
-

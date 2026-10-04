@@ -1,46 +1,47 @@
 /**
- * P2/P3 · 合并世界资产（人物快照 → 人物实体）。
+ * P2/P3 · 合并 —— 把逐章抽出来的**快照**向前合并。
  *
- * 两步（工程约定第 8 节）：
- *   ① 纯代码规则合并 —— 包含关系、版本后缀（提示词判不了的部分留空）
- *   ② AI 别名识别 —— 抓「贾琏 / 琏二爷」这类昵称
+ * 用户定的规则：
+ *   · **向前合并**：一组快照里保留**最早的那条**（`C3-P002`），把其余的删掉
+ *   · id 空着不管，**不重新编号**（重新编号是「入库」时的事）
+ *   · 合并结果**写回快照表**（用户接下来就在这张表上编辑）
  *
- * 合并的 ID 规则（PRD 2.2）：
- *   **不新建、不删除**。每组挑一个成员保留名字作为主名，生成实体 id（P001…）。
- *   真正需要 `mergedInto` 重定向的是 P3 把 **两个已存在的实体** 再合到一起的情形。
+ * 人物和地点走同一套流程：
+ *   ① 本地规则分组（归一化 → 判同 → 并查集）
+ *   ② AI 别名识别（抓「贾琏 / 琏二爷」「荣国府 / 贾府」这类）
+ *   ③ 保留最早那条，字段融合，删掉其余
  */
-import type { Character, StoredCharacterSnapshot } from '@/core/schema/index.ts'
+import type { StoredCharacterSnapshot, StoredLocationSnapshot } from '@/core/schema/index.ts'
 import { AliasGroupsSchema, MergedEntitySchema } from '@/core/schema/index.ts'
-import { getCanonDb } from '@/core/db/canon.ts'
-import { listCharacterSnapshots } from '@/core/db/repo.ts'
+import {
+  listCharacterSnapshots,
+  listLocationSnapshots,
+  replaceCharacterSnapshots,
+  replaceLocationSnapshots,
+} from '@/core/db/repo.ts'
 import { getEventBus, type EventBus } from '@/core/events/bus.ts'
 import { callModel } from '@/core/llm/call.ts'
 import { PROMPTS } from '@/core/prompts/index.ts'
+import { areNamesObviouslySame, normalizeEntryName } from './merge-characters.ts'
 import { runPool } from './pool.ts'
-import {
-  areNamesObviouslySame,
-  groupSnapshots,
-  normalizeEntryName,
-} from './merge-characters.ts'
 
 export interface RunMergeOptions {
   signal?: AbortSignal
   deps?: { call?: typeof callModel }
   bus?: EventBus
-  /** 是否调用 AI 做别名识别。没配 API Key 时设为 false 只跑本地规则。 */
+  /** 是否用 AI 做别名识别与字段融合 */
   useAi?: boolean
 }
 
 export interface RunMergeResult {
   status: 'completed' | 'cancelled'
-  snapshotsProcessed: number
-  characterCount: number
-  /** 被合并掉的快照数（即：多少快照不是独占一个实体） */
-  mergedSnapshotCount: number
-  aiUsed: boolean
+  /** 合并前 / 后每条剩下的记录数（便于日志显示"合并掉了多少"） */
+  characters: { before: number; after: number }
+  locations: { before: number; after: number }
   cost: number
 }
 
+/** 通用并查集 */
 class UnionFind<T> {
   private parent = new Map<T, T>()
   add(x: T): void {
@@ -62,7 +63,7 @@ class UnionFind<T> {
     const rb = this.find(b)
     if (ra !== rb) this.parent.set(rb, ra)
   }
-  groups(): Map<T, T[]> {
+  groups(): T[][] {
     const out = new Map<T, T[]>()
     for (const k of this.parent.keys()) {
       const r = this.find(k)
@@ -70,239 +71,261 @@ class UnionFind<T> {
       list.push(k)
       out.set(r, list)
     }
-    return out
+    return [...out.values()]
   }
 }
 
-function pad3(n: number): string {
-  return String(n).padStart(3, '0')
+interface Named {
+  id: string
+  name: string
+  aliases_mentioned?: string[]
 }
 
-/** 让模型看的人物名单（每行：id | 主名 | 已知别名）。 */
-export function buildAliasInput(snapshots: StoredCharacterSnapshot[]): string {
-  const lines = snapshots.map((s) => {
-    const aliases = (s.aliases_mentioned ?? []).join('/')
-    return `${s.id} | ${s.name} | ${aliases}`
-  })
-  return lines.join('\n')
+/** 本地规则分组：名字归一化后相同、或互相包含（含单字守卫）。 */
+export function groupByName<T extends Named>(items: T[], aliasOf: (item: T) => string[] = () => []): T[][] {
+  const uf = new UnionFind<string>()
+  for (const it of items) uf.add(it.id)
+
+  const match = (a: string, b: string) => areNamesObviouslySame(a, b)
+
+  for (let i = 0; i < items.length; i += 1) {
+    for (let j = i + 1; j < items.length; j += 1) {
+      const a = items[i]!
+      const b = items[j]!
+      const hit =
+        match(a.name, b.name) ||
+        aliasOf(a).some((x) => match(x, b.name)) ||
+        aliasOf(b).some((x) => match(x, a.name))
+      if (hit) uf.union(a.id, b.id)
+    }
+  }
+
+  const byId = new Map(items.map((it) => [it.id, it]))
+  return uf
+    .groups()
+    .map((ids) => ids.map((id) => byId.get(id)!))
+    // 按组内最早出现的 id 排序（`C3-...` 里的章号越小越早）
+    .sort((a, b) => earliestChapter(a.map((x) => x.id)) - earliestChapter(b.map((x) => x.id)))
+}
+
+/** 从 `C3-P002` 里取出章号，用来排序。 */
+export function earliestChapter(ids: string[]): number {
+  const nums = ids
+    .map((id) => /^C([\d.]+)-/.exec(id)?.[1])
+    .map((x) => (x === undefined ? Number.POSITIVE_INFINITY : Number.parseFloat(x)))
+    .filter((n) => Number.isFinite(n))
+  return nums.length ? Math.min(...nums) : Number.POSITIVE_INFINITY
+}
+
+/** 组内保留哪条：**最早的那条**（用户定的"向前合并"）。 */
+export function pickEarliest<T extends { id: string }>(group: T[]): T {
+  return [...group].sort((a, b) => earliestChapter([a.id]) - earliestChapter([b.id]))[0]!
+}
+
+/** 让模型看的名字列表。 */
+function buildAliasInput(items: Named[], kindLabel: string): string {
+  const head = `下面是这部小说的${kindLabel}名单（每行：id | 名字 | 其他称呼）。请找出哪些名字其实是同一个。`
+  const lines = items.map((s) => `${s.id} | ${s.name} | ${(s.aliases_mentioned ?? []).join('/')}`)
+  return [head, '', ...lines].join('\n')
+}
+
+/** 用 AI 的分组结果合并并查集。 */
+function applyAiGroups(
+  uf: UnionFind<string>,
+  items: Named[],
+  groups: Array<{ canonicalName: string; names: string[] }>,
+): void {
+  const byName = new Map<string, string[]>()
+  for (const it of items) {
+    const key = normalizeEntryName(it.name)
+    const list = byName.get(key) ?? []
+    list.push(it.id)
+    byName.set(key, list)
+  }
+  for (const g of groups) {
+    const ids: string[] = []
+    for (const name of g.names) ids.push(...(byName.get(normalizeEntryName(name)) ?? []))
+    for (let i = 1; i < ids.length; i += 1) uf.union(ids[0]!, ids[i]!)
+  }
 }
 
 export async function runMerge(bookId: string, options: RunMergeOptions = {}): Promise<RunMergeResult> {
   const { signal, deps = {}, bus = getEventBus(), useAi = true } = options
   const call = deps.call ?? callModel
+  let cost = 0
 
   bus.emit({ type: 'task:start', bookId, stage: 'P2', total: 1 })
 
-  const snapshots = await listCharacterSnapshots(bookId)
-  if (snapshots.length === 0) {
-    bus.emit({ type: 'task:done', bookId, stage: 'P2', completed: 0, failed: 0 })
-    return {
-      status: 'completed',
-      snapshotsProcessed: 0,
-      characterCount: 0,
-      mergedSnapshotCount: 0,
-      aiUsed: false,
-      cost: 0,
+  // ── 人物 ──
+  const chars = await listCharacterSnapshots(bookId)
+  let mergedChars = chars
+  if (chars.length > 0) {
+    const uf = new UnionFind<string>()
+    for (const c of chars) uf.add(c.id)
+    for (const g of groupByName(chars, (c) => c.aliases ?? [])) {
+      for (let i = 1; i < g.length; i += 1) uf.union(g[0]!.id, g[i]!.id)
     }
-  }
 
-  let cost = 0
-  const uf = new UnionFind<string>()
-  for (const s of snapshots) uf.add(s.id)
-
-  // ── ① 本地规则合并 ──
-  for (const g of groupSnapshots(snapshots)) {
-    const ids = [g.main.id, ...g.others.map((o) => o.id)]
-    for (let i = 1; i < ids.length; i += 1) uf.union(ids[0]!, ids[i]!)
-  }
-
-  // ── ② AI 别名识别（昵称靠这一步）──
-  let aiUsed = false
-  if (useAi) {
-    bus.emit({ type: 'log', level: 'info', message: '  正在识别别名（AI）…' })
-    const res = await call({
-      role: 'aggregation',
-      system: PROMPTS.detectAliasGroups,
-      messages: [{ role: 'user', content: buildAliasInput(snapshots), timestamp: Date.now() }],
-      schema: AliasGroupsSchema,
-      submitToolDescription: '提交识别出的同人分组。',
-      temperature: 0,
-      ...(signal ? { signal } : {}),
-    })
-    for (const u of res.attemptsUsage) cost += u.cost
-
-    if (res.ok && res.data) {
-      aiUsed = true
-      const byName = new Map<string, string[]>()
-      for (const s of snapshots) {
-        const key = normalizeEntryName(s.name)
-        const list = byName.get(key) ?? []
-        list.push(s.id)
-        byName.set(key, list)
-      }
-      for (const group of res.data.groups) {
-        const ids: string[] = []
-        for (const name of group.names) {
-          ids.push(...(byName.get(normalizeEntryName(name)) ?? []))
-        }
-        for (let i = 1; i < ids.length; i += 1) uf.union(ids[0]!, ids[i]!)
-      }
-      bus.emit({ type: 'log', level: 'info', message: `  AI 识别出 ${res.data.groups.length} 组同人` })
-    } else {
-      bus.emit({
-        type: 'log',
-        level: 'warn',
-        message: `  别名识别失败（${res.errorKind ?? 'unknown'}），仅使用本地规则合并`,
+    if (useAi) {
+      bus.emit({ type: 'log', level: 'info', message: `  识别人物别名（AI）…` })
+      const res = await call({
+        role: 'aggregation',
+        system: PROMPTS.detectAliasGroups,
+        messages: [{ role: 'user', content: buildAliasInput(chars, '人物'), timestamp: Date.now() }],
+        schema: AliasGroupsSchema,
+        submitToolDescription: '提交识别出的同人分组。',
+        temperature: 0,
+        ...(signal ? { signal } : {}),
       })
+      for (const u of res.attemptsUsage) cost += u.cost
+      if (res.ok && res.data) {
+        applyAiGroups(uf, chars, res.data.groups)
+        bus.emit({ type: 'log', level: 'info', message: `  AI 识别出 ${res.data.groups.length} 组同人` })
+      } else {
+        bus.emit({ type: 'log', level: 'warn', message: `  别名识别失败（${res.errorKind ?? 'unknown'}），仅用本地规则` })
+      }
     }
+
+    const byId = new Map(chars.map((c) => [c.id, c]))
+    const groups = uf.groups().map((ids) => ids.map((id) => byId.get(id)!).filter(Boolean))
+
+    // 每组：保留最早那条，把其余的信息并进去
+    const survivors: StoredCharacterSnapshot[] = groups.map((group) => {
+      const keep = pickEarliest(group)
+      const others = group.filter((g) => g.id !== keep.id)
+      if (others.length === 0) return keep
+
+      const aliases = new Set<string>([...(keep.aliases ?? []), ...(keep.aliases_mentioned ?? [])])
+      for (const o of others) {
+        aliases.add(o.name)
+        for (const a of o.aliases_mentioned ?? []) aliases.add(a)
+        for (const a of o.aliases ?? []) aliases.add(a)
+      }
+      aliases.delete(keep.name)
+
+      const fill = <K extends keyof StoredCharacterSnapshot>(key: K) =>
+        keep[key] ?? others.find((o) => o[key] !== undefined)?.[key]
+
+      return {
+        ...keep,
+        aliases: [...aliases],
+        identity: fill('identity'),
+        personality: fill('personality'),
+        background: fill('background'),
+        appearance: fill('appearance'),
+        profile: fill('profile'),
+        speech_style_sample: fill('speech_style_sample'),
+        roleWeight: keep.roleWeight ?? others.find((o) => o.roleWeight)?.roleWeight,
+        updatedAt: new Date().toISOString(),
+      } as StoredCharacterSnapshot
+    })
+
+    // AI 字段融合（只对多快照组，写回保留的那条）
+    const multi = survivors.filter((s) => groups.find((g) => g.some((x) => x.id === s.id))!.length > 1)
+    if (useAi && multi.length > 0) {
+      bus.emit({ type: 'log', level: 'info', message: `  融合 ${multi.length} 组人物字段（AI）…` })
+      await runPool(
+        multi,
+        3,
+        async (entity) => {
+          const group = groups.find((g) => g.some((x) => x.id === entity.id))!
+          const res = await call({
+            role: 'aggregation',
+            system: PROMPTS.mergeWorldAssets,
+            messages: [{ role: 'user', content: JSON.stringify({ snapshots: group }, null, 2), timestamp: Date.now() }],
+            schema: MergedEntitySchema,
+            submitToolDescription: '提交融合后的人物档案。',
+            temperature: 0,
+            ...(signal ? { signal } : {}),
+          })
+          for (const u of res.attemptsUsage) cost += u.cost
+          if (!res.ok || !res.data) return
+
+          const fused = res.data.entity
+          const mergedAliases = [...new Set([...(entity.aliases ?? []), ...(fused.aliases ?? [])])].filter(
+            (a) => a !== (fused.name || entity.name),
+          )
+          Object.assign(entity, {
+            name: fused.name || entity.name,
+            aliases: mergedAliases,
+            roleWeight: fused.roleWeight,
+            identity: fused.identity,
+            personality: fused.personality,
+            background: fused.background,
+            appearance: fused.appearance,
+            speech_style_sample: fused.speechStyleSample,
+            ...(fused.profile ? { profile: fused.profile } : {}),
+            updatedAt: new Date().toISOString(),
+          })
+        },
+        signal,
+      )
+    }
+
+    mergedChars = survivors
+    await replaceCharacterSnapshots(bookId, survivors)
+    bus.emit({
+      type: 'log',
+      level: 'info',
+      message: `  人物：${chars.length} 条快照 → ${survivors.length} 条（合并掉 ${chars.length - survivors.length}）`,
+    })
   }
 
-  // ── ③ 成组 → 生成实体 ──
-  const byId = new Map(snapshots.map((s) => [s.id, s]))
-  const groupList = [...uf.groups().values()]
-
-  // 按「最早出现的章节」排序，保证 id 稳定（同样的输入 → 同样的 P001）
-  groupList.sort((a, b) => {
-    const ka = a.map((id) => byId.get(id)!).sort((x, y) => x.chapterIndex.localeCompare(y.chapterIndex, undefined, { numeric: true }))[0]
-    const kb = b.map((id) => byId.get(id)!).sort((x, y) => x.chapterIndex.localeCompare(y.chapterIndex, undefined, { numeric: true }))[0]
-    return (ka?.chapterIndex ?? '').localeCompare(kb?.chapterIndex ?? '', undefined, { numeric: true })
-  })
-
-  const now = new Date().toISOString()
-  const characters: Character[] = groupList.map((ids, idx) => {
-    const members = ids.map((id) => byId.get(id)!).filter(Boolean)
-    // 主名：取本地规则认为质量最高的那个；只有一个就用它自己
-    const local = groupSnapshots(members)[0]
-    const main = local?.main ?? members[0]!
-
-    const aliasSet = new Set<string>()
-    for (const m of members) {
-      aliasSet.add(m.name)
-      for (const a of m.aliases_mentioned ?? []) aliasSet.add(a)
+  // ── 地点 ──
+  const locs = await listLocationSnapshots(bookId)
+  let mergedLocs = locs
+  if (locs.length > 0) {
+    const uf = new UnionFind<string>()
+    for (const l of locs) uf.add(l.id)
+    for (const g of groupByName(locs)) {
+      for (let i = 1; i < g.length; i += 1) uf.union(g[0]!.id, g[i]!.id)
     }
-    aliasSet.delete(main.name)
 
-    return {
-      id: `P${pad3(idx + 1)}`,
-      bookId,
-      name: main.name,
-      aliases: [...aliasSet],
-      // ⚠️ 层级判定属于 AI 融合那一步（提示词 03）；没有 AI 时先保守标成 NPC
-      roleWeight: 'NPC',
-      ...(main.identity ? { identity: main.identity } : {}),
-      ...(main.profile ? { profile: main.profile } : {}),
-      ...(main.appearance ? { appearance: main.appearance } : {}),
-      ...(main.personality ? { personality: main.personality } : {}),
-      ...(main.background ? { background: main.background } : {}),
-      ...(main.speech_style_sample ? { speechStyleSample: main.speech_style_sample } : {}),
-      relations: [],
-      sourceSnapshotIds: members.map((m) => m.id),
-      updatedAt: now,
+    if (useAi) {
+      bus.emit({ type: 'log', level: 'info', message: `  识别地点别名（AI）…` })
+      const res = await call({
+        role: 'aggregation',
+        system: PROMPTS.detectAliasGroups,
+        messages: [{ role: 'user', content: buildAliasInput(locs, '地点'), timestamp: Date.now() }],
+        schema: AliasGroupsSchema,
+        submitToolDescription: '提交识别出的同一地点分组。',
+        temperature: 0,
+        ...(signal ? { signal } : {}),
+      })
+      for (const u of res.attemptsUsage) cost += u.cost
+      if (res.ok && res.data) applyAiGroups(uf, locs, res.data.groups)
     }
-  })
 
-  // ── ③.5 AI 字段级融合 ──
-  // 只有「多个快照并成一个实体」的组才需要融合 —— 单快照组直接用它自己，无需调模型。
-  const multiMember = characters.filter((c) => c.sourceSnapshotIds.length > 1)
-  if (useAi && multiMember.length > 0) {
-    bus.emit({ type: 'log', level: 'info', message: `  正在融合 ${multiMember.length} 组的字段（AI）…` })
+    const byId = new Map(locs.map((l) => [l.id, l]))
+    const groups = uf.groups().map((ids) => ids.map((id) => byId.get(id)!).filter(Boolean))
 
-    await runPool(
-      multiMember,
-      3,
-      async (entity) => {
-        const members = entity.sourceSnapshotIds
-          .map((id) => byId.get(id))
-          .filter((s): s is StoredCharacterSnapshot => Boolean(s))
-        if (members.length < 2) return
+    mergedLocs = groups.map((group) => {
+      const keep = pickEarliest(group)
+      const others = group.filter((g) => g.id !== keep.id)
+      if (others.length === 0) return keep
+      return {
+        ...keep,
+        description: keep.description ?? others.find((o) => o.description)?.description,
+        updatedAt: new Date().toISOString(),
+      } as StoredLocationSnapshot
+    })
 
-        const res = await call({
-          role: 'aggregation',
-          system: PROMPTS.mergeWorldAssets,
-          messages: [
-            {
-              role: 'user',
-              content: JSON.stringify({ snapshots: members }, null, 2),
-              timestamp: Date.now(),
-            },
-          ],
-          schema: MergedEntitySchema,
-          submitToolDescription: '提交融合后的人物档案。',
-          temperature: 0,
-          ...(signal ? { signal } : {}),
-        })
-        for (const u of res.attemptsUsage) cost += u.cost
-
-        if (!res.ok || !res.data) {
-          bus.emit({
-            type: 'log',
-            level: 'warn',
-            message: `  ${entity.name} 的字段融合失败（${res.errorKind ?? 'unknown'}），保留主快照的字段`,
-          })
-          return
-        }
-
-        const fused = res.data.entity
-        // ⚠️ 别名取**并集**而不是覆盖：分组阶段已经收集了可靠的别名，
-        // 模型的返回可能不全（覆盖会丢信息 —— 测试抓到过一次）。
-        const mergedAliases = [...new Set([...entity.aliases, ...(fused.aliases ?? [])])].filter(
-          (a) => a !== (fused.name || entity.name),
-        )
-
-        // 只覆盖内容字段；id / bookId / 来源引用仍由代码说了算
-        Object.assign(entity, {
-          name: fused.name || entity.name,
-          aliases: mergedAliases,
-          roleWeight: fused.roleWeight,
-          identity: fused.identity,
-          personality: fused.personality,
-          background: fused.background,
-          appearance: fused.appearance,
-          speechStyleSample: fused.speechStyleSample,
-          ...(fused.profile ? { profile: fused.profile } : {}),
-        })
-
-        if (res.data.merge_notes.length > 0) {
-          bus.emit({
-            type: 'log',
-            level: 'warn',
-            message: `  ${entity.name} 有 ${res.data.merge_notes.length} 处信息冲突（已保留两说）`,
-          })
-        }
-      },
-      signal,
-    )
+    await replaceLocationSnapshots(bookId, mergedLocs)
+    bus.emit({
+      type: 'log',
+      level: 'info',
+      message: `  地点：${locs.length} 条快照 → ${mergedLocs.length} 条（合并掉 ${locs.length - mergedLocs.length}）`,
+    })
   }
-  // ── ④ 落库（先清后写，保证重跑幂等）──
-  const db = getCanonDb()
-  await db.transaction('rw', db.characters, async () => {
-    await db.characters.where('bookId').equals(bookId).delete()
-    if (characters.length) await db.characters.bulkPut(characters)
-  })
 
-  const mergedSnapshotCount = snapshots.length - characters.length
-  bus.emit({
-    type: 'log',
-    level: 'info',
-    message: `  人物实体 ${characters.length} 个（合并掉 ${mergedSnapshotCount} 个重复快照）`,
-  })
-  bus.emit({ type: 'task:done', bookId, stage: 'P2', completed: 1, failed: 0 })
+  const cancelled = signal?.aborted ?? false
+  if (cancelled) bus.emit({ type: 'task:cancelled', bookId, stage: 'P2' })
+  else bus.emit({ type: 'task:done', bookId, stage: 'P2', completed: 1, failed: 0 })
 
   return {
-    status: 'completed',
-    snapshotsProcessed: snapshots.length,
-    characterCount: characters.length,
-    mergedSnapshotCount,
-    aiUsed,
+    status: cancelled ? 'cancelled' : 'completed',
+    characters: { before: chars.length, after: mergedChars.length },
+    locations: { before: locs.length, after: mergedLocs.length },
     cost,
   }
 }
-
-/** 供 UI / 测试用：读取某本书的人物实体。 */
-export async function listCharacters(bookId: string): Promise<Character[]> {
-  return getCanonDb().characters.where('bookId').equals(bookId).toArray()
-}
-
-export { areNamesObviouslySame }
-
-

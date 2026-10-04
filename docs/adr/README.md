@@ -52,7 +52,7 @@ westworld-v2/
 ├── src-tauri/                 # Tauri 主进程（Rust 外壳）
 ├── src/
 │   ├── core/                  # 与 UI 无关的核心逻辑，可单测
-│   │   ├── schema/            # Zod schema —— 单一真相源（ADR-003）
+│   │   ├── schema/            # TypeBox schema —— 单一真相源（ADR-003）
 │   │   ├── db/                # Dexie 数据层（ADR-002）
 │   │   ├── llm/               # 模型调用抽象层（ADR-004）
 │   │   ├── pipeline/          # P1 / P2 / P2' / P3 编排
@@ -106,6 +106,7 @@ westworld-v2/
 | [ADR-012](ADR-012-模块边界与依赖方向.md) | 分层边界 + 单向依赖，ESLint 强制 | ✅ accepted |
 | [ADR-013](ADR-013-导出导入格式与版本兼容.md) | 单个 `.wwv2` 压缩包，导入默认新建 | ✅ accepted |
 | [ADR-014](ADR-014-数据迁移与Schema版本策略.md) | Dexie 版本化迁移，区分可重生成 / 不可重生成数据 | ✅ accepted |
+| [ADR-018](ADR-018-草稿层与资产包.md) | 解析结果分「草稿层 / 资产包」，用户点**入库**才生成固定资产 | ✅ accepted |
 
 ### D 组 · UI 与可视化（本范围需要）
 
@@ -119,17 +120,17 @@ westworld-v2/
 
 | # | 标题 | 状态 |
 |---|------|------|
-| ADR-018 | 运行时流水线编排（Director → facts → Editor → Narrator） | ⬜ 未起草 |
-| ADR-019 | 运行时工具集契约 | ⬜ 未起草 |
-| ADR-020 | 世界时间推进与事件结算 | ⬜ 未起草 |
-| ADR-021 | 世界线运行时状态与快照实现 | ⬜ 未起草 |
+| ADR-019 | 运行时流水线编排（Director → facts → Editor → Narrator） | ⬜ 未起草 |
+| ADR-020 | 运行时工具集契约 | ⬜ 未起草 |
+| ADR-021 | 世界时间推进与事件结算 | ⬜ 未起草 |
+| ADR-022 | 世界线运行时状态与快照实现 | ⬜ 未起草 |
 ## 配套文件
 
-- **docs/engineering-conventions.md** —— 参数级技术约定（技术栈、分章正则、编码处理、并发、提示词目录、Zod 与 DB 的边界）。**写代码前必读。**
+- **docs/engineering-conventions.md** —— 参数级技术约定（技术栈、分章正则、编码处理、并发、提示词目录、TypeBox 与 DB 的边界）。**写代码前必读。**
 
 ## 不属于 ADR 的东西
 
-- 完整数据 schema（人物 / 地点 / 节点 / 事件线）→ 在 Zod 定义（ADR-003）+ PRD
+- 完整数据 schema（人物 / 地点 / 节点 / 事件线）→ 在 TypeBox 定义（ADR-003）+ PRD
 - 工具函数完整签名 → ADR-012
 - 提示词全文 → `prompts/`，后续并入 `src/core/prompts/`
 

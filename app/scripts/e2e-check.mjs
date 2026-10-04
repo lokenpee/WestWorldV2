@@ -4,7 +4,7 @@
  * 用 Chrome DevTools Protocol 打开页面、注入数据、点击、读 DOM ——
  * 因为环境里没有 Playwright，而 --dump-dom 只能看首屏。
  *
- * 用法：node scripts/e2e-check.mjs http://localhost:5201/
+ * 用法：node scripts/e2e-check.mjs http://localhost:5201/ [截图目录]
  */
 import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
@@ -16,6 +16,8 @@ const URL = process.argv[2] ?? 'http://localhost:5201/'
 // 用随机端口：固定端口会被上一次没杀干净的 Chrome 占用，导致连到旧实例
 const PORT = 9400 + Math.floor(Math.random() * 500)
 const SHOT_DIR = process.argv[3] ?? null
+
+const BOOK_ID = 'bk_e2e'
 
 const profile = mkdtempSync(join(tmpdir(), 'ww-e2e-'))
 const chrome = spawn(
@@ -69,20 +71,55 @@ function makeSend(ws) {
     })
 }
 
-/** 往 IndexedDB 里塞一本书 + 人物 + 事件线，让资产界面有东西可显示。 */
-const SEED = `
+/** 往设置库里塞一本书（书架在设置库，不在 canon 库）。 */
+const SEED_BOOK = `
 (async () => {
-  // 不指定版本：应用加载时已经用 Dexie 建好库（Dexie 会把版本号 ×10，写死会 VersionError）
-  const req = indexedDB.open('westworld_canon')
+  const req = indexedDB.open('westworld_settings')
   const db = await new Promise((res, rej) => {
-    req.onupgradeneeded = () => { throw new Error('库不存在：应用应当先建好') }
-
     req.onsuccess = () => res(req.result)
     req.onerror = () => rej(req.error)
   })
-  const tx = db.transaction(['books','characters','eventLines','nodes'], 'readwrite')
-  tx.objectStore('books').put({ id: 'bk_e2e', title: 'E2E 测试书', createdAt: new Date().toISOString() })
+  const stores = [...db.objectStoreNames]
+  const has = (n) => stores.includes(n)
+  const tx = db.transaction(['books'].filter(has), 'readwrite')
+  tx.objectStore('books').put({ id: '${BOOK_ID}', title: 'E2E 测试书', createdAt: new Date(2000, 0, 1).toISOString() })
+  await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error) })
+  db.close()
+  return 'book seeded'
+})()
+`
 
+/**
+ * 往 canon 库（每本书一个）里塞资产。
+ * 人物 / 地点读的是**快照表**（草稿层）；characters / locations 是入库后的固定资产。
+ */
+const SEED_CANON = `
+(async () => {
+  const req = indexedDB.open('westworld_canon_${BOOK_ID}')
+  const db = await new Promise((res, rej) => {
+    req.onupgradeneeded = () => rej(new Error('canon 库应先由应用创建（需要先选中这本书）'))
+    req.onsuccess = () => res(req.result)
+    req.onerror = () => rej(req.error)
+  })
+
+  const tx = db.transaction(['characterSnapshots','locationSnapshots','characters','locations','eventLines','nodes'], 'readwrite')
+
+  const snaps = [
+    { id: 'C1-P001', chapterIndex: '1', name: '贾琏', aliases: ['琏二爷'], aliases_mentioned: ['琏二爷'], roleWeight: '重要配角', identity: '荣国府长孙', confidence: 0.9 },
+    { id: 'C4-P001', chapterIndex: '4', name: '贾赦', roleWeight: '重要配角', identity: '荣国府长子', confidence: 0.9 },
+    { id: 'C9-P001', chapterIndex: '9', name: '琪官', roleWeight: 'NPC', identity: '戏子', confidence: 0.9 },
+  ]
+  for (const c of snaps) {
+    tx.objectStore('characterSnapshots').put({
+      ...c, bookId: '${BOOK_ID}', chapterName: '第' + c.chapterIndex + '章', updatedAt: '',
+    })
+  }
+  tx.objectStore('locationSnapshots').put({
+    id: 'C1-L001', bookId: '${BOOK_ID}', chapterIndex: '1', chapterName: '第一章',
+    name: '荣国府', description: '贾府主宅', confidence: 0.9,
+  })
+
+  // 入库后的固定资产（资产包）
   const chars = [
     { id: 'P001', name: '贾琏', aliases: ['琏二爷'], roleWeight: '重要配角', identity: '荣国府长孙' },
     { id: 'P002', name: '贾赦', aliases: [], roleWeight: '重要配角', identity: '荣国府长子' },
@@ -90,9 +127,10 @@ const SEED = `
   ]
   for (const c of chars) {
     tx.objectStore('characters').put({
-      ...c, bookId: 'bk_e2e', relations: [], sourceSnapshotIds: ['C1-P001'], updatedAt: ''
+      ...c, bookId: '${BOOK_ID}', relations: [], confidence: 0.9, updatedAt: '',
     })
   }
+  tx.objectStore('locations').put({ id: 'L001', bookId: '${BOOK_ID}', chapterIndex: '1', name: '荣国府', confidence: 0.9 })
 
   const nodes = [
     ['C1-N001', '1', '资金异常', '贾琏手头忽然宽裕', ['贾琏']],
@@ -103,7 +141,7 @@ const SEED = `
   ]
   nodes.forEach(([id, ch, name, summary, actors], i) => {
     tx.objectStore('nodes').put({
-      id, bookId: 'bk_e2e', chapterIndex: ch, chapterName: '第' + ch + '章', order: i,
+      id, bookId: '${BOOK_ID}', chapterIndex: ch, chapterName: '第' + ch + '章', order: i,
       name, summary, actors, quote: '……原文……', confidence: 0.9, createdBy: 'P1', eventLineIds: []
     })
   })
@@ -114,13 +152,13 @@ const SEED = `
   ]
   for (const l of lines) {
     tx.objectStore('eventLines').put({
-      ...l, bookId: 'bk_e2e', cause: '起因一句话', process: '经过一句话', result: '结果一句话',
+      ...l, bookId: '${BOOK_ID}', cause: '起因一句话', process: '经过一句话', result: '结果一句话',
       lineStatus: 'open', updatedAt: ''
     })
   }
   await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = () => rej(tx.error) })
   db.close()
-  return 'seeded'
+  return 'canon seeded'
 })()
 `
 
@@ -155,21 +193,26 @@ async function main() {
 
   check('首屏渲染（导入页）', String(await evalJs('document.body.textContent')).includes('导入小说'))
 
-  // 注入数据后重载 —— 应该自动选中那本书并显示资产 tab
-  await evalJs(SEED)
+  // ① 先塞书架 → 重载 → 应用选中这本书，同时把它的 canon 库建出来
+  await evalJs(SEED_BOOK)
+  await send('Page.reload')
+  await sleep(1500)
+  // ② 再塞资产 → 重载 → 资产界面有东西可显示
+  await evalJs(SEED_CANON)
   await send('Page.reload')
   await sleep(1800)
   const assetText = await evalJs('document.body.textContent')
   await shot('01-assets')
   check('自动选中已有书籍（不再退回导入页）', assetText.includes('人物') && assetText.includes('事件网络'))
-  check('人物实体显示', assetText.includes('贾琏') && assetText.includes('P001'))
+  check('人物快照显示', assetText.includes('贾琏') && assetText.includes('C1-P001'))
+  check('资产包状态显示（已入库）', assetText.includes('资产包'))
 
   // 点一个人物 → 打开编辑抽屉
-  await evalJs(`[...document.querySelectorAll('li')].find(li => li.textContent.includes('P001'))?.click()`)
+  await evalJs(`[...document.querySelectorAll('li')].find(li => li.textContent.includes('C1-P001'))?.click()`)
   await sleep(500)
   const detailText = await evalJs('document.body.textContent')
   await shot('05-edit')
-  check('点人物打开编辑抽屉', detailText.includes('手动归并'))
+  check('点人物打开编辑抽屉', detailText.includes('手动合并'))
   check('编辑抽屉有字段', detailText.includes('主名') && detailText.includes('性格'))
 
   // 改一个字段并保存 → 列表应当自动刷新
@@ -179,16 +222,22 @@ async function main() {
     const target = idx >= 0 ? inputs[idx] : null;
     if (!target) return 'no-input';
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-    setter.call(target, '荣国府长孙');
+    setter.call(target, '荣国府长孙（改）');
     target.dispatchEvent(new Event('input', { bubbles: true }));
     return 'ok';
   })()`)
   await sleep(200)
   await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent === '保存')?.click()`)
   await sleep(600)
-  check('保存后自动生效', (await evalJs('document.body.textContent')).includes('荣国府长孙'))
+  check('保存后自动生效', (await evalJs('document.body.textContent')).includes('荣国府长孙（改）'))
   // 试跑一章（不点开始，只验证入口在）
   check('有「试跑一章」入口', (await evalJs('document.body.textContent')).includes('试跑一章'))
+  check('有「入库」入口', (await evalJs('document.body.textContent')).includes('入库'))
+
+  // 真的点一次「入库」→ 应出现结果提示
+  await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === '入库')?.click()`)
+  await sleep(900)
+  check('点「入库」后给出结果反馈', (await evalJs('document.body.textContent')).includes('已入库'))
 
   // 切到「事件线」
   await evalJs(`[...document.querySelectorAll('button')].find(b => b.textContent.startsWith('事件线'))?.click()`)
@@ -234,15 +283,3 @@ main().catch((e) => {
   chrome.kill()
   process.exit(1)
 })
-
-
-
-
-
-
-
-
-
-
-
-

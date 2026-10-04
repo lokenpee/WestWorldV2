@@ -7,7 +7,7 @@
 import { getChapterText, listChapters } from '@/core/db/repo.ts'
 import type {
   StoredCharacterSnapshot,
-  StoredLocation,
+  StoredLocationSnapshot,
   StoredNode,
 } from '@/core/schema/index.ts'
 import { extractChapter, type P1Failure } from './p1.ts'
@@ -19,7 +19,7 @@ export interface TryOneResult {
   sourceText: string
   sourceTruncated: boolean
   characters: StoredCharacterSnapshot[]
-  locations: StoredLocation[]
+  locations: StoredLocationSnapshot[]
   nodes: StoredNode[]
   failures: P1Failure[]
   cost: number
@@ -57,7 +57,7 @@ export async function tryOneChapter(
     sourceText: text.slice(0, 2000),
     sourceTruncated: text.length > 2000,
     characters: result.characterSnapshots,
-    locations: result.locations,
+    locations: result.locationSnapshots,
     nodes: result.nodes,
     failures: result.failures,
     cost: result.usages.reduce((s, u) => s + u.cost, 0),

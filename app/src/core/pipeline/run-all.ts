@@ -21,7 +21,11 @@ export interface RunAllOptions {
 
 export interface RunAllResult {
   p1: { status: CompileStatus; completed: number; failed: number; cost: number }
-  merge: { characterCount: number; mergedSnapshotCount: number; cost: number } | null
+  merge: {
+    characters: { before: number; after: number }
+    locations: { before: number; after: number }
+    cost: number
+  } | null
   link: { eventLineCount: number; batches: number; failedBatches: number; cost: number } | null
   totalCost: number
 }
@@ -53,8 +57,8 @@ export async function runAll(bookId: string, options: RunAllOptions = {}): Promi
     ...(deps?.call ? { deps: { call: deps.call } } : {}),
   })
   merge = {
-    characterCount: mergeRes.characterCount,
-    mergedSnapshotCount: mergeRes.mergedSnapshotCount,
+    characters: mergeRes.characters,
+    locations: mergeRes.locations,
     cost: mergeRes.cost,
   }
   totalCost += mergeRes.cost

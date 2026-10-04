@@ -1,7 +1,13 @@
-import { useEffect, useState } from 'react'
-import { deleteCharacter, deleteEventLine, deleteLocation, deleteNode } from '@/core/assets/edit.ts'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  deleteCharacterSnapshot,
+  deleteEventLine,
+  deleteLocationSnapshot,
+  deleteNode,
+} from '@/core/assets/edit.ts'
 import { runAll } from '@/core/pipeline/run-all.ts'
-import { AssetDetail, type AssetItem } from '@/features/assets/AssetDetail.tsx'
+import { publishCanon } from '@/core/pipeline/publish.ts'
+import { AssetDetail, type AssetItem, type MergeCandidate } from '@/features/assets/AssetDetail.tsx'
 import { CompilePanel } from '@/features/compile/CompilePanel.tsx'
 import { ImportPanel } from '@/features/import/ImportPanel.tsx'
 import { TryOnePanel } from '@/features/assets/TryOnePanel.tsx'
@@ -9,12 +15,14 @@ import { NetworkPanel } from '@/features/network/NetworkPanel.tsx'
 import {
   useBooks,
   useCharacters,
+  useCharacterSnapshots,
   useEventLines,
-  useLocations,
+  useLocationSnapshots,
   useNodes,
   useProgress,
 } from '@/queries/index.ts'
 import { useUiStore } from '@/features/store/ui-store.ts'
+import type { RoleWeight } from '@/core/schema/index.ts'
 
 const TABS = [
   { key: 'characters', label: '人物' },
@@ -24,27 +32,25 @@ const TABS = [
   { key: 'network', label: '事件网络' },
 ] as const
 
+const ROLE_FILTERS: Array<'全部' | RoleWeight> = ['全部', '主要人物', '重要配角', 'NPC', '路人']
+
 function Empty({ text }: { text: string }) {
   return <p className="p-6 text-sm text-neutral-400">{text}</p>
 }
 
 function Stop({ onClick }: { onClick: (e: React.MouseEvent) => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="text-xs text-neutral-400 hover:text-red-600"
-    >
+    <button type="button" onClick={onClick} className="text-xs text-neutral-400 hover:text-red-600">
       删除
     </button>
   )
 }
 
 /**
- * 资产工作台：导入 → 进度 → 资产浏览/编辑 → 事件网络。
+ * 资产工作台：导入 → 进度 → 资产浏览/编辑 → 入库 → 事件网络。
  *
- * 数据通过 queries/ 订阅（useLiveQuery）—— 编辑或删除后列表**自动刷新**。
- * 点任意一项会在右侧打开编辑抽屉。
+ * ⚠️ 入库前，人物 / 地点列表读的是**快照表（草稿层）**，不是 characters / locations。
+ * 点「入库」之后才生成固定资产（游戏只读那一份）。再点一次 = 生成新的一份。
  */
 export function AssetsPanel() {
   const bookId = useUiStore((s) => s.bookId)
@@ -53,20 +59,44 @@ export function AssetsPanel() {
   const setBookId = useUiStore((s) => s.setBookId)
   const [showImport, setShowImport] = useState(false)
   const [rerunning, setRerunning] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+  const [publishedNote, setPublishedNote] = useState<string | null>(null)
   const [selected, setSelected] = useState<AssetItem | null>(null)
   const [trying, setTrying] = useState(false)
+  const [roleFilter, setRoleFilter] = useState<'全部' | RoleWeight>('全部')
 
   const books = useBooks()
   const progress = useProgress(bookId)
-  const characters = useCharacters(bookId)
-  const locations = useLocations(bookId)
+  const characterSnapshots = useCharacterSnapshots(bookId)
+  const locationSnapshots = useLocationSnapshots(bookId)
   const nodes = useNodes(bookId)
   const lines = useEventLines(bookId)
+  // 固定资产（入库后才有）—— 只用来显示"资产包"状态
+  const publishedCharacters = useCharacters(bookId)
 
   // 刷新页面后 store 是空的 —— 自动选最近的一本书，而不是让用户重新导入
   useEffect(() => {
     if (!bookId && books && books.length > 0) setBookId(books[0]!.id)
   }, [bookId, books, setBookId])
+
+  const visibleCharacters = useMemo(() => {
+    const list = characterSnapshots ?? []
+    return roleFilter === '全部' ? list : list.filter((c) => (c.roleWeight ?? 'NPC') === roleFilter)
+  }, [characterSnapshots, roleFilter])
+
+  const publish = async () => {
+    if (!bookId) return
+    setPublishing(true)
+    try {
+      const r = await publishCanon(bookId)
+      setPublishedNote(
+        `已入库：${r.characters} 人物 · ${r.locations} 地点` +
+          (r.unmappedNames.length ? ` · ${r.unmappedNames.length} 个名字没匹配上` : ''),
+      )
+    } finally {
+      setPublishing(false)
+    }
+  }
 
   if (!bookId || showImport) {
     return (
@@ -88,19 +118,28 @@ export function AssetsPanel() {
   }
 
   const counts = {
-    characters: characters?.length ?? 0,
-    locations: locations?.length ?? 0,
+    characters: characterSnapshots?.length ?? 0,
+    locations: locationSnapshots?.length ?? 0,
     nodes: nodes?.length ?? 0,
     lines: lines?.length ?? 0,
   }
 
+  const published = (publishedCharacters?.length ?? 0) > 0
+
+  const characterCandidates: MergeCandidate[] = (characterSnapshots ?? []).map((c) => ({
+    id: c.id,
+    name: c.name,
+  }))
+  const locationCandidates: MergeCandidate[] = (locationSnapshots ?? []).map((l) => ({
+    id: l.id,
+    name: l.name,
+  }))
+
   return (
     <div className="flex h-full flex-col">
-      {progress && progress.status !== 'idle' && (
-        <CompilePanel />
-      )}
+      {progress && progress.status !== 'idle' && <CompilePanel />}
 
-      <div className="flex items-center gap-1 border-b border-neutral-200 bg-white px-4">
+      <div className="flex flex-wrap items-center gap-1 border-b border-neutral-200 bg-white px-4">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -124,7 +163,16 @@ export function AssetsPanel() {
             )}
           </button>
         ))}
-        <div className="ml-auto flex gap-2">
+        <div className="ml-auto flex items-center gap-2 py-1">
+          <span
+            className={
+              'rounded px-2 py-0.5 text-[10px] ' +
+              (published ? 'bg-emerald-50 text-emerald-700' : 'bg-neutral-100 text-neutral-500')
+            }
+            title="入库后生成固定资产，游戏只读这一份；再点一次入库会用当前草稿生成新的一份"
+          >
+            {published ? `资产包：${publishedCharacters?.length ?? 0} 人物` : '未入库'}
+          </span>
           <button
             type="button"
             onClick={() => setTrying(true)}
@@ -145,7 +193,15 @@ export function AssetsPanel() {
             }}
             className="rounded border border-neutral-300 px-3 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40"
           >
-            {rerunning ? '重跑中…' : '重跑合并'}
+            {rerunning ? '重跑中…' : '重跑全部'}
+          </button>
+          <button
+            type="button"
+            disabled={publishing}
+            onClick={() => void publish()}
+            className="rounded bg-neutral-900 px-3 py-1 text-xs text-white hover:bg-neutral-700 disabled:opacity-40"
+          >
+            {publishing ? '入库中…' : '入库'}
           </button>
           <button
             type="button"
@@ -157,56 +213,83 @@ export function AssetsPanel() {
         </div>
       </div>
 
+      {publishedNote && (
+        <div className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50 px-4 py-1.5 text-xs text-emerald-800">
+          {publishedNote}
+          <button
+            type="button"
+            onClick={() => setPublishedNote(null)}
+            className="ml-auto text-emerald-600 hover:text-emerald-900"
+          >
+            知道了
+          </button>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1">
         <div className="min-h-0 flex-1 overflow-auto">
-          {assetTab === 'characters' &&
-            (counts.characters === 0 ? (
-              <Empty text="还没有人物实体。提取+合并完成后会出现在这里。" />
-            ) : (
-              <ul className="divide-y divide-neutral-100">
-                {characters?.map((c) => (
-                  <li
-                    key={c.id}
-                    onClick={() => setSelected({ kind: 'character', item: c })}
+          {assetTab === 'characters' && (
+            <>
+              <div className="sticky top-0 z-10 flex items-center gap-1 border-b border-neutral-100 bg-neutral-50 px-4 py-1.5">
+                {ROLE_FILTERS.map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setRoleFilter(r)}
                     className={
-                      'flex cursor-pointer items-baseline gap-3 px-4 py-2 hover:bg-white ' +
-                      (selected?.kind === 'character' && selected.item.id === c.id ? 'bg-white' : '')
+                      'rounded px-2 py-0.5 text-[11px] ' +
+                      (roleFilter === r
+                        ? 'bg-neutral-900 text-white'
+                        : 'text-neutral-500 hover:bg-neutral-200')
                     }
                   >
-                    <span className="font-mono text-xs text-neutral-400">{c.id}</span>
-                    <span className="text-sm font-medium">{c.name}</span>
-                    <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-600">
-                      {c.roleWeight}
-                    </span>
-                    {c.mergedInto && (
-                      <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">
-                        → {c.mergedInto}
-                      </span>
-                    )}
-                    {c.aliases.length > 0 && (
-                      <span className="text-xs text-neutral-400">别名 {c.aliases.join(' / ')}</span>
-                    )}
-                    {c.identity && <span className="text-xs text-neutral-500">{c.identity}</span>}
-                    <span className="ml-auto text-[10px] text-neutral-400">
-                      {c.sourceSnapshotIds.length} 个快照
-                    </span>
-                    <Stop
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        void deleteCharacter(c.id)
-                      }}
-                    />
-                  </li>
+                    {r}
+                  </button>
                 ))}
-              </ul>
-            ))}
+                <span className="ml-auto text-[10px] text-neutral-400">草稿层（快照）· 入库后冻结</span>
+              </div>
+              {visibleCharacters.length === 0 ? (
+                <Empty text="还没有人物快照。提取+合并完成后会出现在这里。" />
+              ) : (
+                <ul className="divide-y divide-neutral-100">
+                  {visibleCharacters.map((c) => (
+                    <li
+                      key={c.id}
+                      onClick={() => setSelected({ kind: 'character', item: c })}
+                      className={
+                        'flex cursor-pointer items-baseline gap-3 px-4 py-2 hover:bg-white ' +
+                        (selected?.kind === 'character' && selected.item.id === c.id ? 'bg-white' : '')
+                      }
+                    >
+                      <span className="font-mono text-xs text-neutral-400">{c.id}</span>
+                      <span className="text-sm font-medium">{c.name}</span>
+                      <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] text-neutral-600">
+                        {c.roleWeight ?? 'NPC'}
+                      </span>
+                      {(c.aliases?.length ?? 0) > 0 && (
+                        <span className="text-xs text-neutral-400">别名 {c.aliases!.join(' / ')}</span>
+                      )}
+                      {c.identity && <span className="text-xs text-neutral-500">{c.identity}</span>}
+                      <Stop
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void deleteCharacterSnapshot(bookId, c.id)
+                          setSelected(null)
+                        }}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
 
           {assetTab === 'locations' &&
-            (counts.locations === 0 ? (
-              <Empty text="还没有地点。" />
+            ((locationSnapshots?.length ?? 0) === 0 ? (
+              <Empty text="还没有地点快照。提取+合并完成后会出现在这里。" />
             ) : (
               <ul className="divide-y divide-neutral-100">
-                {locations?.map((l) => (
+                {locationSnapshots?.map((l) => (
                   <li
                     key={l.id}
                     onClick={() => setSelected({ kind: 'location', item: l })}
@@ -223,7 +306,8 @@ export function AssetsPanel() {
                     <Stop
                       onClick={(e) => {
                         e.stopPropagation()
-                        void deleteLocation(l.id)
+                        void deleteLocationSnapshot(bookId, l.id)
+                        setSelected(null)
                       }}
                     />
                   </li>
@@ -257,7 +341,8 @@ export function AssetsPanel() {
                       <Stop
                         onClick={(e) => {
                           e.stopPropagation()
-                          void deleteNode(n.id)
+                          void deleteNode(bookId, n.id)
+                          setSelected(null)
                         }}
                       />
                     </div>
@@ -306,7 +391,8 @@ export function AssetsPanel() {
                       <Stop
                         onClick={(e) => {
                           e.stopPropagation()
-                          void deleteEventLine(l.id)
+                          void deleteEventLine(bookId, l.id)
+                          setSelected(null)
                         }}
                       />
                     </div>
@@ -325,17 +411,18 @@ export function AssetsPanel() {
 
         {selected && assetTab !== 'network' && (
           <AssetDetail
+            bookId={bookId}
             asset={selected}
-            allCharacters={characters ?? []}
+            mergeCandidates={selected.kind === 'character' ? characterCandidates : locationCandidates}
             onClose={() => setSelected(null)}
+            onChanged={() => {
+              /* useLiveQuery 会自动刷新，无需手动 */
+            }}
           />
         )}
+      </div>
 
       {trying && <TryOnePanel bookId={bookId} onClose={() => setTrying(false)} />}
-      </div>
     </div>
   )
 }
-
-
-

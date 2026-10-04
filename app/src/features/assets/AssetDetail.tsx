@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react'
 import {
-  mergeCharacters,
-  unmergeCharacter,
-  updateCharacter,
+  mergeCharacterSnapshots,
+  mergeLocationSnapshots,
+  setCharacterRoleWeight,
+  updateCharacterSnapshot,
   updateEventLine,
-  updateLocation,
+  updateLocationSnapshot,
   updateNode,
 } from '@/core/assets/edit.ts'
 import type {
-  Character,
   EventLine,
   RoleWeight,
-  StoredLocation,
+  StoredCharacterSnapshot,
+  StoredLocationSnapshot,
   StoredNode,
 } from '@/core/schema/index.ts'
 
@@ -20,8 +21,8 @@ const ROLE_WEIGHTS: RoleWeight[] = ['主要人物', '重要配角', 'NPC', '路�
 export type AssetKind = 'character' | 'location' | 'node' | 'line'
 
 export type AssetItem =
-  | { kind: 'character'; item: Character }
-  | { kind: 'location'; item: StoredLocation }
+  | { kind: 'character'; item: StoredCharacterSnapshot }
+  | { kind: 'location'; item: StoredLocationSnapshot }
   | { kind: 'node'; item: StoredNode }
   | { kind: 'line'; item: EventLine }
 
@@ -121,14 +122,24 @@ function Field({
   )
 }
 
+/** 可并入的目标（同类型、非自己）。 */
+export interface MergeCandidate {
+  id: string
+  name: string
+}
+
 export function AssetDetail({
+  bookId,
   asset,
-  allCharacters,
+  mergeCandidates,
   onClose,
+  onChanged,
 }: {
+  bookId: string
   asset: AssetItem
-  allCharacters: Character[]
+  mergeCandidates: MergeCandidate[]
   onClose: () => void
+  onChanged: () => void
 }) {
   const [values, setValues] = useState<Record<string, string>>(() => toEditable(asset))
   const [saving, setSaving] = useState(false)
@@ -139,23 +150,38 @@ export function AssetDetail({
   useEffect(() => {
     setValues(toEditable(asset))
     setSavedAt(0)
+    setMergeTarget('')
   }, [asset])
+
+  const id = asset.item.id
 
   async function save() {
     setSaving(true)
     try {
       const patch = fromEditable(asset.kind, values)
-      if (asset.kind === 'character') await updateCharacter(asset.item.id, patch)
-      else if (asset.kind === 'location') await updateLocation(asset.item.id, patch)
-      else if (asset.kind === 'node') await updateNode(asset.item.id, patch)
-      else await updateEventLine(asset.item.id, patch)
+      if (asset.kind === 'character') await updateCharacterSnapshot(bookId, id, patch)
+      else if (asset.kind === 'location') await updateLocationSnapshot(bookId, id, patch)
+      else if (asset.kind === 'node') await updateNode(bookId, id, patch)
+      else await updateEventLine(bookId, id, patch)
       setSavedAt(Date.now())
+      onChanged()
     } finally {
       setSaving(false)
     }
   }
 
-  const id = asset.item.id
+  /** 手动合并：把**当前这条**并入选择的保留项（保留最早的那条，其余删掉）。 */
+  async function doMerge() {
+    if (!mergeTarget) return
+    if (asset.kind === 'character') await mergeCharacterSnapshots(bookId, mergeTarget, [id])
+    else if (asset.kind === 'location') await mergeLocationSnapshots(bookId, mergeTarget, [id])
+    else return
+    setMergeTarget('')
+    onChanged()
+    onClose()
+  }
+
+  const canMerge = asset.kind === 'character' || asset.kind === 'location'
 
   return (
     <aside className="flex w-96 shrink-0 flex-col border-l border-neutral-200 bg-white">
@@ -181,15 +207,16 @@ export function AssetDetail({
           />
         ))}
 
-        {/* 人物特有：层级 */}
+        {/* 人物特有：层级（合并阶段由 AI 初判，用户可改） */}
         {asset.kind === 'character' && (
           <label className="block">
             <span className="mb-1 block text-xs text-neutral-500">层级</span>
             <select
-              value={asset.item.roleWeight}
+              value={asset.item.roleWeight ?? 'NPC'}
               onChange={async (e) => {
-                await updateCharacter(id, { roleWeight: e.target.value as RoleWeight })
+                await setCharacterRoleWeight(bookId, id, e.target.value as RoleWeight)
                 setSavedAt(Date.now())
+                onChanged()
               }}
               className="w-full rounded border border-neutral-300 px-2 py-1 text-sm"
             >
@@ -209,8 +236,9 @@ export function AssetDetail({
             <select
               value={asset.item.lineStatus}
               onChange={async (e) => {
-                await updateEventLine(id, { lineStatus: e.target.value as 'open' | 'closed' })
+                await updateEventLine(bookId, id, { lineStatus: e.target.value as 'open' | 'closed' })
                 setSavedAt(Date.now())
+                onChanged()
               }}
               className="w-full rounded border border-neutral-300 px-2 py-1 text-sm"
             >
@@ -220,58 +248,36 @@ export function AssetDetail({
           </label>
         )}
 
-        {/* 人物特有：手动归并 */}
-        {asset.kind === 'character' && (
+        {/* 手动合并（只对人物 / 地点）：保留最早的那条，其余删掉，id 空着不管 */}
+        {canMerge && (
           <div className="rounded border border-neutral-200 p-3">
-            <div className="mb-2 text-xs font-medium text-neutral-600">手动归并</div>
-            {asset.item.mergedInto ? (
-              <div className="space-y-2">
-                <p className="text-xs text-neutral-500">
-                  已被合并到 <span className="font-mono">{asset.item.mergedInto}</span>
-                </p>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await unmergeCharacter(id)
-                    setSavedAt(Date.now())
-                  }}
-                  className="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50"
-                >
-                  撤销归并
-                </button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <select
-                  value={mergeTarget}
-                  onChange={(e) => setMergeTarget(e.target.value)}
-                  className="flex-1 rounded border border-neutral-300 px-2 py-1 text-xs"
-                >
-                  <option value="">选择要并入的人物…</option>
-                  {allCharacters
-                    .filter((c) => c.id !== id && !c.mergedInto)
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.id} {c.name}
-                      </option>
-                    ))}
-                </select>
-                <button
-                  type="button"
-                  disabled={!mergeTarget}
-                  onClick={async () => {
-                    await mergeCharacters(mergeTarget, id)
-                    setMergeTarget('')
-                    setSavedAt(Date.now())
-                  }}
-                  className="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40"
-                >
-                  并入
-                </button>
-              </div>
-            )}
+            <div className="mb-2 text-xs font-medium text-neutral-600">手动合并</div>
+            <div className="flex gap-2">
+              <select
+                value={mergeTarget}
+                onChange={(e) => setMergeTarget(e.target.value)}
+                className="flex-1 rounded border border-neutral-300 px-2 py-1 text-xs"
+              >
+                <option value="">把这条并入…</option>
+                {mergeCandidates
+                  .filter((c) => c.id !== id)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.id} {c.name}
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                disabled={!mergeTarget}
+                onClick={() => void doMerge()}
+                className="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50 disabled:opacity-40"
+              >
+                并入
+              </button>
+            </div>
             <p className="mt-2 text-[10px] leading-4 text-neutral-400">
-              归并是「保留对方、把你标记为已合并」——不删除、可撤销、引用会自动回填。
+              合并 = 保留目标那条（最早出现的），把这条删掉。不可撤销；id 空着不管，落库时才重新编号。
             </p>
           </div>
         )}

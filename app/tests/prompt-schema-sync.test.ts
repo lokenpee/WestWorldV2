@@ -36,7 +36,7 @@ describe('提示词与 TypeBox schema 的一致性（ADR-011）', () => {
       'LinkEventLinesResultSchema',
       'MergedEntitySchema',
       'CharacterSnapshotSchema',
-      'LocationSchema',
+      'LocationSnapshotSchema',
       'NodeSchema',
       'WorldAssetsExtractionSchema',
       'NarrativeAssetsExtractionSchema',

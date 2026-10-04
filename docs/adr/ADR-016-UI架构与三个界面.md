@@ -59,7 +59,7 @@ decision-makers: 用户（产品负责人）
 ```typescript
 // features/assets/CharacterList.tsx
 const characters = useLiveQuery(
-  () => db.character_snapshots.where('bookId').equals(bookId).toArray(),
+  () => getCanonDb(bookId).characterSnapshots.toArray(),
   [bookId]
 )
 ```

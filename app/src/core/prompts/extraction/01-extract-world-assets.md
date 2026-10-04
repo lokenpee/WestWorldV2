@@ -72,12 +72,13 @@ stage: P1（每章第 1 次调用）
 
 ### locations[] · 地点
 
-<!-- AUTO-GENERATED:START source=LocationSchema -->
-<!-- 以下内容由 scripts/render-prompt-schema.ts 从 LocationSchema 生成，勿手改 -->
+<!-- AUTO-GENERATED:START source=LocationSnapshotSchema -->
+<!-- 以下内容由 scripts/render-prompt-schema.ts 从 LocationSnapshotSchema 生成，勿手改 -->
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `name` | string | ✅ | 地点名称，用原文的叫法。例：荣国府 / 县一中。 |
 | `description` | string | ⬜ | 一句话描述。原文没写就留空。 |
+| `confidence` | number | ✅ | 抽取置信度，0 到 1 之间的小数。不确定时给低分，不要编造。 |
 <!-- AUTO-GENERATED:END -->
 
 ## 自检清单

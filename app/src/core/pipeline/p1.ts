@@ -12,11 +12,11 @@
  */
 import type {
   CharacterSnapshot,
-  Location,
+  LocationSnapshot,
   NarrativeAssetsExtraction,
   Node,
   StoredCharacterSnapshot,
-  StoredLocation,
+  StoredLocationSnapshot,
   StoredNode,
   WorldAssetsExtraction,
 } from '@/core/schema/index.ts'
@@ -44,7 +44,7 @@ export interface P1Failure {
 
 export interface P1Result {
   characterSnapshots: StoredCharacterSnapshot[]
-  locations: StoredLocation[]
+  locationSnapshots: StoredLocationSnapshot[]
   nodes: StoredNode[]
   /** 两次调用的用量合计（成本统计用，含重试） */
   usages: CallUsage[]
@@ -96,12 +96,22 @@ export function assignCharacterIds(
   }))
 }
 
-export function assignLocationIds(input: P1Input, locations: Location[]): StoredLocation[] {
+/**
+ * 给地点快照分配 id。
+ *
+ * 与人物、节点**同构**：`C{章号}-L{章内序号}`，例 `C37-L002`。
+ * 这样 id 自带位置信息，且跨章不会冲突（每章有自己的编号空间）。
+ */
+export function assignLocationIds(
+  input: P1Input,
+  locations: LocationSnapshot[],
+): StoredLocationSnapshot[] {
   return dedupeByName(locations).map((l, i) => ({
     ...l,
-    id: `L${pad3(i + 1)}`,
+    id: `C${input.chapterIndex}-L${pad3(i + 1)}`,
     bookId: input.bookId,
     chapterIndex: input.chapterIndex,
+    chapterName: input.chapterName,
   }))
 }
 
@@ -148,7 +158,7 @@ export async function extractChapter(input: P1Input, deps: P1Deps = {}): Promise
   usages.push(...world.attemptsUsage)
 
   let characters: CharacterSnapshot[] = []
-  let locations: Location[] = []
+  let locations: LocationSnapshot[] = []
   if (world.ok && world.data) {
     const data = world.data as WorldAssetsExtraction
     characters = data.characters ?? []
@@ -187,9 +197,12 @@ export async function extractChapter(input: P1Input, deps: P1Deps = {}): Promise
 
   return {
     characterSnapshots: assignCharacterIds(input, characters),
-    locations: assignLocationIds(input, locations),
+    locationSnapshots: assignLocationIds(input, locations),
     nodes: assignNodeIds(input, nodes),
     usages,
     failures,
   }
 }
+
+
+

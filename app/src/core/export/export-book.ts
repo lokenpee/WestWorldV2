@@ -3,10 +3,11 @@
  *
  * 产出的是**字节**，不是文件 —— 下载（需要 DOM）由 features/ 负责（ADR-012）。
  *
- * 明确不导出：API Key（在另一个库里，结构上带不出来）、事件日志（体积大且含正文）。
+ * 明确不导出：API Key（在设置库，结构上带不出来）、事件日志（体积大且含正文）。
  */
 import { zipSync, strToU8 } from 'fflate'
 import { getCanonDb } from '@/core/db/canon.ts'
+import { getBook } from '@/core/db/repo.ts'
 import {
   BACKUP_FORMAT,
   BACKUP_FORMAT_VERSION,
@@ -22,21 +23,31 @@ export interface ExportResult {
 }
 
 export async function exportBook(bookId: string): Promise<ExportResult> {
-  const db = getCanonDb()
-  const book = await db.books.get(bookId)
+  const db = getCanonDb(bookId)
+  const book = await getBook(bookId)
   if (!book) throw new Error(`书籍不存在：${bookId}`)
 
-  const [chapters, texts, snapshots, characters, locations, nodes, eventLines, progress] =
-    await Promise.all([
-      db.chapters.where('bookId').equals(bookId).toArray(),
-      db.chapterTexts.where('bookId').equals(bookId).toArray(),
-      db.characterSnapshots.where('bookId').equals(bookId).toArray(),
-      db.characters.where('bookId').equals(bookId).toArray(),
-      db.locations.where('bookId').equals(bookId).toArray(),
-      db.nodes.where('bookId').equals(bookId).toArray(),
-      db.eventLines.where('bookId').equals(bookId).toArray(),
-      db.compileProgress.where('bookId').equals(bookId).toArray(),
-    ])
+  const [
+    chapters,
+    texts,
+    snapshots,
+    locationSnapshots,
+    characters,
+    locations,
+    nodes,
+    eventLines,
+    progress,
+  ] = await Promise.all([
+    db.chapters.toArray(),
+    db.chapterTexts.toArray(),
+    db.characterSnapshots.toArray(),
+    db.locationSnapshots.toArray(),
+    db.characters.toArray(),
+    db.locations.toArray(),
+    db.nodes.toArray(),
+    db.eventLines.toArray(),
+    db.compileProgress.toArray(),
+  ])
 
   const files: Record<string, Uint8Array> = {}
 
@@ -45,6 +56,7 @@ export async function exportBook(bookId: string): Promise<ExportResult> {
     ['data/book.json', book],
     ['data/chapters.json', chapters],
     ['data/characterSnapshots.json', snapshots],
+    ['data/locationSnapshots.json', locationSnapshots],
     ['data/characters.json', characters],
     ['data/locations.json', locations],
     ['data/nodes.json', nodes],
@@ -77,7 +89,17 @@ export async function exportBook(bookId: string): Promise<ExportResult> {
       ...(book.author ? { author: book.author } : {}),
       chapterCount: chapters.length,
     },
-    contents: ['book', 'chapters', 'characterSnapshots', 'characters', 'locations', 'nodes', 'eventLines', 'compileProgress'],
+    contents: [
+      'book',
+      'chapters',
+      'characterSnapshots',
+      'locationSnapshots',
+      'characters',
+      'locations',
+      'nodes',
+      'eventLines',
+      'compileProgress',
+    ],
     excludes: ['apiKey', 'eventLog'],
     checksums,
   }

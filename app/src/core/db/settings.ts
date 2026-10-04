@@ -1,4 +1,5 @@
 import Dexie, { type Table } from 'dexie'
+import type { Book } from '@/core/schema/index.ts'
 
 /**
  * 设置库 —— 与 Canon 库**物理分离**。
@@ -9,13 +10,20 @@ import Dexie, { type Table } from 'dexie'
  *   - 物理隔离后，"导出不含 Key" 是**结构上成立**的，不靠自觉
  */
 export const SETTINGS_DB_NAME = 'westworld_settings'
-export const SETTINGS_VERSION = 1
+export const SETTINGS_VERSION = 2
 
 export const SETTINGS_STORES = {
   /** 凭据：一个 provider 一条（pi-ai 的 CredentialStore 语义） */
   credentials: 'providerId',
   /** 应用设置：键值对 */
   appSettings: 'key',
+  /**
+   * 书架：列出用户导入过的书。
+   *
+   * 为什么放在这里而不是 Canon 库：Canon 库现在**每本书一个**，
+   * 而"列出所有书"是跨书的全局信息 —— 它属于设置库。
+   */
+  books: 'id, createdAt',
 } as const
 
 export interface StoredCredentialRow {
@@ -33,10 +41,14 @@ export interface AppSettingRow {
 export class SettingsDatabase extends Dexie {
   credentials!: Table<StoredCredentialRow, string>
   appSettings!: Table<AppSettingRow, string>
+  books!: Table<Book, string>
 
   constructor(name = SETTINGS_DB_NAME) {
     super(name)
-    this.version(SETTINGS_VERSION).stores({ ...SETTINGS_STORES })
+    // v1：credentials / appSettings
+    this.version(1).stores({ credentials: 'providerId', appSettings: 'key' })
+    // v2：加入书架
+    this.version(2).stores({ ...SETTINGS_STORES })
   }
 }
 
@@ -54,3 +66,4 @@ export async function resetSettingsDbForTest(): Promise<void> {
     instance = null
   }
 }
+

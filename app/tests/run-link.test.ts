@@ -7,11 +7,10 @@ import {
   buildExistingLinesDigest,
   buildNodesDigest,
   deriveLineFields,
-  resolveCharacterIds,
   runLink,
   splitIntoBatches,
 } from '../src/core/pipeline/run-link.ts'
-import type { Character, StoredNode } from '../src/core/schema/index.ts'
+import type { StoredNode } from '../src/core/schema/index.ts'
 
 afterEach(async () => {
   await resetCanonDbForTest()
@@ -89,23 +88,13 @@ describe('派生字段由代码算（不让模型编）', () => {
     expect(deriveLineFields(['不存在'], nodes).chapters).toEqual([])
   })
 
-  it('actors 能通过别名解析到人物实体 id', () => {
-    const chars = [
-      { id: 'P001', name: '贾琏', aliases: ['琏二爷'] },
-    ] as Character[]
-    const byId = new Map<string, StoredNode>([
-      ['x', node('x', '1', 0, { actors: ['琏二爷'] })],
-      ['y', node('y', '1', 1, { actors: ['路人甲'] })],
-    ])
-    expect(resolveCharacterIds(['x', 'y'], byId, chars)).toEqual(['P001'])
-  })
 })
 
 describe('串联事件线', () => {
   it('create 落库，派生字段由代码补齐', async () => {
     await saveP1Result('bk', {
       characterSnapshots: [],
-      locations: [],
+      locationSnapshots: [],
       nodes: [node('C1-N001', '1', 0), node('C2-N001', '2', 0)],
     })
 
@@ -126,7 +115,7 @@ describe('串联事件线', () => {
     const r = await runLink('bk', { deps: { call } })
     expect(r.eventLineCount).toBe(1)
 
-    const lines = await (await import('../src/core/db/canon.ts')).getCanonDb().eventLines.toArray()
+    const lines = await (await import('../src/core/db/canon.ts')).getCanonDb('bk').eventLines.toArray()
     expect(lines[0]?.id).toBe('L01')
     expect(lines[0]?.chapters).toEqual(['1', '2'])
   })
@@ -134,7 +123,7 @@ describe('串联事件线', () => {
   it('append 追加到已有线，不新建', async () => {
     await saveP1Result('bk', {
       characterSnapshots: [],
-      locations: [],
+      locationSnapshots: [],
       nodes: [node('C1-N001', '1', 0), node('C3-N001', '3', 0)],
     })
 
@@ -156,14 +145,14 @@ describe('串联事件线', () => {
     expect(r.eventLineCount).toBe(1)
     expect(r.batches).toBe(2)
 
-    const db = (await import('../src/core/db/canon.ts')).getCanonDb()
+    const db = (await import('../src/core/db/canon.ts')).getCanonDb('bk')
     const line = await db.eventLines.get('L01')
     expect(line?.nodeIds.sort()).toEqual(['C1-N001', 'C3-N001'])
     expect(line?.lineStatus).toBe('closed')
   })
 
   it('引用不存在的事件线 → 忽略并记日志，不崩', async () => {
-    await saveP1Result('bk', { characterSnapshots: [], locations: [], nodes: [node('C1-N001', '1', 0)] })
+    await saveP1Result('bk', { characterSnapshots: [], locationSnapshots: [], nodes: [node('C1-N001', '1', 0)] })
     const call = vi.fn(async () =>
       linkResult([
         { op: 'append', line_id: 'L99', node_ids: ['C1-N001'], cause: '', process: '', result: '', line_status: 'open' },
@@ -182,7 +171,7 @@ describe('串联事件线', () => {
   it('某批失败 → 跳过继续，不中止', async () => {
     await saveP1Result('bk', {
       characterSnapshots: [],
-      locations: [],
+      locationSnapshots: [],
       nodes: [node('C1-N001', '1', 0), node('C2-N001', '2', 0)],
     })
 
@@ -199,25 +188,25 @@ describe('串联事件线', () => {
   })
 
   it('重跑幂等（先清后写）', async () => {
-    await saveP1Result('bk', { characterSnapshots: [], locations: [], nodes: [node('C1-N001', '1', 0)] })
+    await saveP1Result('bk', { characterSnapshots: [], locationSnapshots: [], nodes: [node('C1-N001', '1', 0)] })
     const call = vi.fn(async () =>
       linkResult([{ op: 'create', title: '线', node_ids: ['C1-N001'], cause: '', process: '', result: '', line_status: 'open' }]),
     ) as never
 
     await runLink('bk', { deps: { call } })
     await runLink('bk', { deps: { call } })
-    const db = (await import('../src/core/db/canon.ts')).getCanonDb()
+    const db = (await import('../src/core/db/canon.ts')).getCanonDb('bk')
     expect(await db.eventLines.count()).toBe(1)
   })
 
   it('回填节点的 eventLineIds（多对多）', async () => {
-    await saveP1Result('bk', { characterSnapshots: [], locations: [], nodes: [node('C1-N001', '1', 0)] })
+    await saveP1Result('bk', { characterSnapshots: [], locationSnapshots: [], nodes: [node('C1-N001', '1', 0)] })
     const call = vi.fn(async () =>
       linkResult([{ op: 'create', title: '线', node_ids: ['C1-N001'], cause: '', process: '', result: '', line_status: 'open' }]),
     ) as never
 
     await runLink('bk', { deps: { call } })
-    const db = (await import('../src/core/db/canon.ts')).getCanonDb()
+    const db = (await import('../src/core/db/canon.ts')).getCanonDb('bk')
     const n = await db.nodes.get('C1-N001')
     expect(n?.eventLineIds).toEqual(['L01'])
   })

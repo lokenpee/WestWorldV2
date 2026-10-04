@@ -116,7 +116,7 @@ export async function runP1(bookId: string, options: RunP1Options = {}): Promise
           bookId,
           chapterIndex,
           characters: result.characterSnapshots.length,
-          locations: result.locations.length,
+          locations: result.locationSnapshots.length,
           nodes: result.nodes.length,
         })
       }

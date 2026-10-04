@@ -327,36 +327,49 @@ P2 在窗口内已经合并过一轮，但 **P3 的全局合并可能把两个 P
 
 ### 合并的 ID 规则（重要）
 
-**不是"新建实体 + 删除旧的"，而是"挑一个保留 + 另一个加重定向"。**
+**向前合并：一组里保留最早的那条，其余删掉；id 空着不管。**
 
 ```
-① 并查集聚组：[P001 贾琏] + [P042 琏二爷] → 判定为同一人
+① 并查集聚组：[C3-P002 贾琏] + [C7-P012 琏二爷] → 判定为同一人
       ↓
-② 代码挑主（不经过 LLM）：内容更丰富的那个保留原 ID
+② 保留最早出现的那条：id = C3-P002，别名/字段汇总到它身上
       ↓
-③ 被合并的实体不删除，加字段：{ "id": "P042", "merged_into": "P001" }
-      ↓
-④ 回填引用：节点 / 事件线 / 关系里所有指向 P042 的引用改成 P001
-      （或在查询时解析 merged_into 重定向）
+③ 其余快照直接删掉（不留 mergedInto、不做重定向）
 ```
 
-**LLM 的角色是融合内容，不是决定 ID。** ID 由代码按质量分挑（见《工程约定》第 8 节）。
-
-为什么必须这样：
+**LLM 的角色是融合内容与识别别名，不是决定 ID。** 保留哪条由代码按"章号最小"挑。
 
 | 做法 | 为什么不行 |
 |------|-----------|
 | 合并后**新建**一个 ID | 节点、事件线、关系全都引用着旧 ID，新建意味着所有引用都要改，漏一处就断链 |
-| 把被合并的实体**删掉** | ① 无法追溯 ② 用户手动合并错了没法拆开 ③ 还有引用指着它就变成悬空引用 |
+| 保留 `mergedInto` 标记、不删除 | 表里长期留着大量"已合并"的僵尸行，每次查询都要过滤；未被采纳 |
 
-**支持撤销**：把 `merged_into` 清掉即可拆回两个实体。
+> 合并**只动草稿层**（`characterSnapshots` / `locationSnapshots`）。
+> 实体层（`characters` / `locations`）由「入库」生成，见 2.2.1。
 
-### 快照与实体
-### 快照与实体
+### 2.2.1 草稿层与资产包（两层数据）
 
-- 快照 id：`C037-P03`（第 37 章第 3 个人物）
-- 实体 id：`P001`
-- 快照保留自己的 id，另挂 `entity_id: "P001"`（可追溯）
+| 层 | 表 | 谁写 | 谁读 |
+|----|----|------|------|
+| **草稿层** | `characterSnapshots` / `locationSnapshots` | P1 抽 → P2/P3 合并 → **用户编辑** | 资产界面 |
+| **资产包** | `characters` / `locations` | **只有「入库」写** | 游戏（只读） |
+
+- 快照 id：`C037-P003`（第 37 章第 3 个人物 / 地点 / 事件）
+- 实体 id：`P001` / `L001`（**入库时重新编码**）
+- 合并阶段（P2/P3）**不生成** `characters` / `locations` —— 用户点「入库」才生成
+- 入库 = 读草稿 → 重新编号 → 写资产包（**整体重算**，连点两次不会翻倍）
+- 再点一次「入库」= 用当前草稿生成**新的一份**资产包
+
+**人物引用分两个阶段：**
+
+| 字段 | 草稿阶段 | 入库后 |
+|------|---------|--------|
+| `nodes.actors` | 人名（P1 原样，**永不改写**） | 不变 |
+| `nodes.actorIds` | 空 | 由代码 name→id 映射写入 |
+| `eventLines.characterIds` | 空 | 由成员节点的 `actorIds` 汇总 |
+
+> 为什么 `actors` 不改写成 id：① 原文称呼要留着 ② 第二次入库还得有名字可映射 ③ UI 显示"谁参与了"不用回查人物表。
+> 详见 ADR-018。
 
 ### relationships（有向，内部存 id）
 
@@ -378,7 +391,8 @@ P2 在窗口内已经合并过一轮，但 **P3 的全局合并可能把两个 P
 id / 名称 / 一句话描述
 ```
 
-不做层级、不做归并（同一文件夹平铺）。**由 P1 抽取。**
+不做层级（同一文件夹平铺）。**由 P1 抽取、逐章记为快照**（和人物一样：同一个地点每章都会抽到，
+所以也有 `locationSnapshots`，P2/P3 向前合并后才剩一条）。
 
 ## 2.4 事件节点
 
@@ -442,7 +456,7 @@ id / 名称 / 一句话描述
 
 ```json
 {
-  "entity_id": "P001",
+  "characterId": "P001",
   "alive": true,
   "location_id": "loc_012",
   "flags": {}
@@ -488,14 +502,14 @@ id / 名称 / 一句话描述
 ## 2.8 多世界线隔离
 
 ```
-westworld_canon                    ← Canon 层：所有书的编译产物（记录带 bookId 字段）
+westworld_canon_{bookId}           ← Canon 层：**每本书一个库**（id 是书内编号，必须隔离）
 westworld_state_{bookId}_{lineId}  ← 世界线库：每条世界线一个，物理隔离
 ```
 
 | 方案 | 优点 | 缺点 |
 |------|------|------|
 | 单库 + `worldline_id` 过滤 | 跨线对比方便 | 容易漏过滤而串味 |
-| **世界线一个库（选定）** | **物理隔离绝不串味；删档 = 删库；Canon 是单库、每本书的数据只编译一次** | 跨线对比要开多个库（低频） |
+| **世界线一个库（选定）** | **物理隔离绝不串味；删档 = 删库；Canon 每本书一个库，同一本书的多条世界线共用同一份编译产物** | 跨线对比要开多个库（低频） |
 
 ## 2.9 快照与回滚
 
@@ -514,21 +528,31 @@ westworld_state_{bookId}_{lineId}  ← 世界线库：每条世界线一个，�
 
 ## 2.11 IndexedDB Object Store 清单
 
-**Canon 库**：
+**设置库** `westworld_settings`（跨书全局）：
 
 | Store | 内容 | 关键索引 |
 |-------|------|---------|
-| `characters` | 人物实体 | `by_roleWeight`, `by_name` |
-| `character_snapshots` | 每章人物快照 | `by_entity_id`, `by_chapter` |
-| `locations` | 地点 | `by_name` |
-| `nodes` | 事件节点 | `by_chapter`, `by_time`, `by_event_line`(**multiEntry**) |
-| `event_lines` | 事件线 | — |
-| `edges` | 图边（人物关系 + 事件线连接） | `by_graph`, `by_source`, `by_target`, `by_type` |
-| `timeline_anchors` | 时间锚点 | `by_time` |
-| `chapter_texts` | 原文正文（按章分片 Blob） | — |
-| `compile_progress` | 断点续跑进度 | — |
+| `books` | 书架（导入过哪些书） | `id`, `createdAt` |
+| `credentials` | 每个 provider 一条凭据 | `providerId` |
+| `appSettings` | 应用设置（键值对） | `key` |
 
-**世界线库**：
+**Canon 库** `westworld_canon_{bookId}`（**每本书一个**）：
+
+| Store | 内容 | 关键索引 |
+|-------|------|---------|
+| `chapters` | 章节元信息（不含正文） | `chapterIndex`, `order` |
+| `chapterTexts` | 原文正文（按章分片） | `chapterIndex` |
+| `characterSnapshots` | **人物快照（草稿层，用户在这上面编辑）** | `id`, `chapterIndex`, `name` |
+| `locationSnapshots` | **地点快照（草稿层）** | `id`, `chapterIndex`, `name` |
+| `characters` | 人物实体（**入库后才生成**） | `id`, `name` |
+| `locations` | 地点实体（**入库后才生成**） | `id`, `name` |
+| `nodes` | 事件节点 | `id`, `chapterIndex`, `order` |
+| `eventLines` | 事件线 | `id` |
+| `compileProgress` | 断点续跑进度 | `stage` |
+
+> 表结构的唯一真相源是 `app/src/core/db/stores.ts`（有漂移测试 `tests/db.test.ts`）。
+
+**世界线库** `westworld_state_{bookId}_{lineId}`（游玩阶段，尚未实现）：
 
 | Store | 内容 |
 |-------|------|

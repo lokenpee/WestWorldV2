@@ -24,7 +24,7 @@ const worldAssetsSample = {
       confidence: 0.92,
     },
   ],
-  locations: [{ name: '荣国府', description: '贾府主宅' }],
+  locations: [{ name: '荣国府', description: '贾府主宅', confidence: 0.9 }],
 }
 
 const narrativeAssetsSample = {

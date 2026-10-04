@@ -98,6 +98,12 @@ export const StoredNodeSchema = Type.Composite(
       eventLineIds: Type.Optional(
         Type.Array(Type.String(), { description: '所属事件线 id。多对多，聚合后才有。' }),
       ),
+      actorIds: Type.Optional(
+        Type.Array(Type.String(), {
+          description:
+            '入库时由代码把 actors（人名）映射成的人物实体 id。draft 阶段为空；重新入库会整体重算。',
+        }),
+      ),
       timeCoord: Type.Optional(
         Type.String({
           description: '虚构时间坐标。由 P2 推断，P1 阶段为空。例："003-02-15 08:00"',

@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox'
 import { CharacterSnapshotSchema } from './character-snapshot.ts'
-import { LocationSchema } from './location.ts'
+import { LocationSnapshotSchema } from './location-snapshot.ts'
 import { NodeSchema } from './node.ts'
 
 /**
@@ -14,7 +14,7 @@ import { NodeSchema } from './node.ts'
 export const WorldAssetsExtractionSchema = Type.Object(
   {
     characters: Type.Array(CharacterSnapshotSchema, { description: '本章出现的人物快照。' }),
-    locations: Type.Array(LocationSchema, { description: '本章出现的地点。' }),
+    locations: Type.Array(LocationSnapshotSchema, { description: '本章出现的地点。' }),
   },
   { additionalProperties: false, description: 'P1-A：世界资产提取结果。' },
 )
@@ -33,3 +33,4 @@ export const NarrativeAssetsExtractionSchema = Type.Object(
 )
 
 export type NarrativeAssetsExtraction = Static<typeof NarrativeAssetsExtractionSchema>
+

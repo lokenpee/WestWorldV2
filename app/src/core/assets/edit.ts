@@ -1,122 +1,153 @@
 /**
- * 资产的编辑与删除（以及手动归并）。
+ * 资产编辑 —— 用户在**快照层（草稿）**上操作。
  *
- * 放在 core/assets/ 而不是 features/ 里，是为了让 UI 只调用函数、
- * 不直接碰数据库（ADR-012 第 3 条）。
+ * 设计要点（用户定的）：
+ *   · 用户编辑的就是快照表（characterSnapshots / locationSnapshots / nodes / eventLines）
+ *   · 合并 = 向前合并：保留最早的那条，把其余的删掉（id 空着不管）
+ *   · 入库是另一个动作（见 core/pipeline/publish.ts），这里只动草稿
  *
- * 原则：**只允许改内容字段，禁止改结构字段**（id / bookId / chapterIndex / 来源引用）——
- * 结构字段被改会让节点与事件线的引用断链。
+ * 所有函数都要 bookId —— 因为**每本书一个库**（ADR-002）。
  */
 import type {
-  Character,
   EventLine,
   RoleWeight,
   StoredCharacterSnapshot,
-  StoredLocation,
+  StoredLocationSnapshot,
   StoredNode,
 } from '@/core/schema/index.ts'
 import { getCanonDb } from '@/core/db/canon.ts'
 
-// ── 人物快照（P1 原始观察，一般不改，但允许修错）──
+// ── 人物快照 ──
 
 export type CharacterSnapshotEdit = Partial<
-  Pick<StoredCharacterSnapshot, 'name' | 'identity' | 'personality' | 'background' | 'appearance'>
->
-
-export async function updateCharacterSnapshot(id: string, patch: CharacterSnapshotEdit): Promise<void> {
-  await getCanonDb().characterSnapshots.update(id, patch)
-}
-
-export async function deleteCharacterSnapshot(id: string): Promise<void> {
-  await getCanonDb().characterSnapshots.delete(id)
-}
-
-// ── 人物实体（P2/P3 合并产物）──
-
-export type CharacterEdit = Partial<
   Pick<
-    Character,
+    StoredCharacterSnapshot,
     'name' | 'aliases' | 'roleWeight' | 'identity' | 'personality' | 'background' | 'appearance'
   >
 >
 
-export async function updateCharacter(id: string, patch: CharacterEdit): Promise<void> {
-  await getCanonDb().characters.update(id, patch)
+export async function updateCharacterSnapshot(
+  bookId: string,
+  id: string,
+  patch: CharacterSnapshotEdit,
+): Promise<void> {
+  await getCanonDb(bookId).characterSnapshots.update(id, { ...patch, updatedAt: new Date().toISOString() })
 }
 
-export async function deleteCharacter(id: string): Promise<void> {
-  await getCanonDb().characters.delete(id)
-}
-
-/** 改人物的层级（主要人物 / 重要配角 / NPC / 路人）。 */
-export async function setRoleWeight(id: string, roleWeight: RoleWeight): Promise<void> {
-  await getCanonDb().characters.update(id, { roleWeight })
+export async function deleteCharacterSnapshot(bookId: string, id: string): Promise<void> {
+  await getCanonDb(bookId).characterSnapshots.delete(id)
 }
 
 /**
- * 手动归并两个人物实体（ADR：支持用户手动归并）。
+ * 手动合并人物：把 `mergeIds` 并入 `keepId`（保留最早的那条）。
  *
- * 规则与自动合并一致：**保留 `keepId`，另一个写 `mergedInto` 重定向，并回填引用**。
- * 不删除被合并的实体 —— 可追溯、可撤销、防悬空引用。
+ * 规则与自动合并一致：**保留 keepId，其余删掉**。别名与简历信息汇总到保留的那条。
  */
-export async function mergeCharacters(keepId: string, mergeId: string): Promise<void> {
-  if (keepId === mergeId) throw new Error('不能把自己合并到自己')
+export async function mergeCharacterSnapshots(
+  bookId: string,
+  keepId: string,
+  mergeIds: string[],
+): Promise<void> {
+  const ids = mergeIds.filter((id) => id !== keepId)
+  if (ids.length === 0) return
 
-  const db = getCanonDb()
-  await db.transaction('rw', db.characters, db.nodes, db.eventLines, async () => {
-    const keep = await db.characters.get(keepId)
-    const drop = await db.characters.get(mergeId)
-    if (!keep || !drop) throw new Error('人物实体不存在')
+  const db = getCanonDb(bookId)
+  await db.transaction('rw', db.characterSnapshots, async () => {
+    const keep = await db.characterSnapshots.get(keepId)
+    if (!keep) throw new Error('要保留的那条快照不存在')
 
-    // 1) 合并内容到保留的那个（主名不变，别名汇总）
-    const aliases = [...new Set([...keep.aliases, drop.name, ...drop.aliases])].filter(
-      (a) => a !== keep.name,
+    const others = (await db.characterSnapshots.bulkGet(ids)).filter(
+      (s): s is StoredCharacterSnapshot => Boolean(s),
     )
-    await db.characters.update(keepId, {
-      aliases,
-      sourceSnapshotIds: [...new Set([...keep.sourceSnapshotIds, ...drop.sourceSnapshotIds])],
+
+    const aliases = new Set<string>([...(keep.aliases ?? []), ...(keep.aliases_mentioned ?? [])])
+    for (const o of others) {
+      aliases.add(o.name)
+      for (const a of o.aliases_mentioned ?? []) aliases.add(a)
+      for (const a of o.aliases ?? []) aliases.add(a)
+    }
+    aliases.delete(keep.name)
+
+    // 保留的那条里没有的字段，从被合并的那里补上（不覆盖已有内容）
+    const fill = <K extends keyof StoredCharacterSnapshot>(key: K): StoredCharacterSnapshot[K] | undefined =>
+      keep[key] ?? others.find((o) => o[key])?.[key]
+
+    await db.characterSnapshots.update(keepId, {
+      aliases: [...aliases],
+      roleWeight: keep.roleWeight ?? others.find((o) => o.roleWeight)?.roleWeight,
+      identity: fill('identity'),
+      personality: fill('personality'),
+      background: fill('background'),
+      appearance: fill('appearance'),
+      updatedAt: new Date().toISOString(),
     })
 
-    // 2) 被合并的实体标记重定向（不删）
-    await db.characters.update(mergeId, { mergedInto: keepId })
-
-    // 3) 回填引用：事件线里的 characterIds
-    const lines = await db.eventLines.where('bookId').equals(keep.bookId).toArray()
-    for (const l of lines) {
-      if (!l.characterIds.includes(mergeId)) continue
-      const next = [...new Set(l.characterIds.map((c) => (c === mergeId ? keepId : c)))]
-      await db.eventLines.update(l.id, { characterIds: next })
-    }
+    await db.characterSnapshots.bulkDelete(ids)
   })
 }
 
-/** 撤销一次手动归并（把 mergedInto 清掉）。 */
-export async function unmergeCharacter(id: string): Promise<void> {
-  await getCanonDb().characters.update(id, { mergedInto: undefined })
+/** 改人物层级（用户在 UI 上手动定级）。 */
+export async function setCharacterRoleWeight(
+  bookId: string,
+  id: string,
+  roleWeight: RoleWeight,
+): Promise<void> {
+  await getCanonDb(bookId).characterSnapshots.update(id, {
+    roleWeight,
+    updatedAt: new Date().toISOString(),
+  })
 }
 
-// ── 地点 ──
+// ── 地点快照 ──
 
-export type LocationEdit = Partial<Pick<StoredLocation, 'name' | 'description'>>
+export type LocationSnapshotEdit = Partial<Pick<StoredLocationSnapshot, 'name' | 'description'>>
 
-export async function updateLocation(id: string, patch: LocationEdit): Promise<void> {
-  await getCanonDb().locations.update(id, patch)
+export async function updateLocationSnapshot(
+  bookId: string,
+  id: string,
+  patch: LocationSnapshotEdit,
+): Promise<void> {
+  await getCanonDb(bookId).locationSnapshots.update(id, { ...patch, updatedAt: new Date().toISOString() })
 }
 
-export async function deleteLocation(id: string): Promise<void> {
-  await getCanonDb().locations.delete(id)
+export async function deleteLocationSnapshot(bookId: string, id: string): Promise<void> {
+  await getCanonDb(bookId).locationSnapshots.delete(id)
+}
+
+/** 手动合并地点：保留 keepId，其余删掉。 */
+export async function mergeLocationSnapshots(
+  bookId: string,
+  keepId: string,
+  mergeIds: string[],
+): Promise<void> {
+  const ids = mergeIds.filter((id) => id !== keepId)
+  if (ids.length === 0) return
+
+  const db = getCanonDb(bookId)
+  await db.transaction('rw', db.locationSnapshots, async () => {
+    const keep = await db.locationSnapshots.get(keepId)
+    if (!keep) throw new Error('要保留的那条快照不存在')
+    const others = (await db.locationSnapshots.bulkGet(ids)).filter(
+      (s): s is StoredLocationSnapshot => Boolean(s),
+    )
+    await db.locationSnapshots.update(keepId, {
+      description: keep.description ?? others.find((o) => o.description)?.description,
+      updatedAt: new Date().toISOString(),
+    })
+    await db.locationSnapshots.bulkDelete(ids)
+  })
 }
 
 // ── 事件节点 ──
 
 export type NodeEdit = Partial<Pick<StoredNode, 'name' | 'summary' | 'actors' | 'time_text'>>
 
-export async function updateNode(id: string, patch: NodeEdit): Promise<void> {
-  await getCanonDb().nodes.update(id, patch)
+export async function updateNode(bookId: string, id: string, patch: NodeEdit): Promise<void> {
+  await getCanonDb(bookId).nodes.update(id, patch)
 }
 
-export async function deleteNode(id: string): Promise<void> {
-  await getCanonDb().nodes.delete(id)
+export async function deleteNode(bookId: string, id: string): Promise<void> {
+  await getCanonDb(bookId).nodes.delete(id)
 }
 
 // ── 事件线 ──
@@ -125,10 +156,20 @@ export type EventLineEdit = Partial<
   Pick<EventLine, 'title' | 'cause' | 'process' | 'result' | 'lineStatus'>
 >
 
-export async function updateEventLine(id: string, patch: EventLineEdit): Promise<void> {
-  await getCanonDb().eventLines.update(id, patch)
+export async function updateEventLine(bookId: string, id: string, patch: EventLineEdit): Promise<void> {
+  await getCanonDb(bookId).eventLines.update(id, patch)
 }
 
-export async function deleteEventLine(id: string): Promise<void> {
-  await getCanonDb().eventLines.delete(id)
+export async function deleteEventLine(bookId: string, id: string): Promise<void> {
+  await getCanonDb(bookId).eventLines.delete(id)
+}
+
+// ── 入库后的固定资产（只读为主，这里只提供删除）──
+
+export async function deleteCharacter(bookId: string, id: string): Promise<void> {
+  await getCanonDb(bookId).characters.delete(id)
+}
+
+export async function deleteStoredLocation(bookId: string, id: string): Promise<void> {
+  await getCanonDb(bookId).locations.delete(id)
 }

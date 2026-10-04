@@ -11,10 +11,36 @@ vi.mock('@earendil-works/pi-ai/models', () => ({
     getModel: (_p: string, id: string) => ({ id, provider: 'deepseek' }),
     complete: completeMock,
   }),
+  // provider.ts 会用它构建 provider —— mock 里给一个等价的最小实现
+  createProvider: (opts: { id: string; name?: string; baseUrl?: string; models: unknown[] }) => ({
+    id: opts.id,
+    name: opts.name ?? opts.id,
+    baseUrl: opts.baseUrl,
+    getModels: () => opts.models,
+  }),
 }))
 
+// provider.ts 会从 DeepSeek 目录里拿一个模型当模板，所以 mock 必须提供 getModels
 vi.mock('@earendil-works/pi-ai/providers/deepseek', () => ({
-  deepseekProvider: () => ({ id: 'deepseek', name: 'DeepSeek' }),
+  deepseekProvider: () => ({
+    id: 'deepseek',
+    name: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com',
+    getModels: () => [
+      {
+        id: 'deepseek-flash',
+        name: 'DeepSeek Flash',
+        api: 'openai-completions',
+        provider: 'deepseek',
+        baseUrl: 'https://api.deepseek.com',
+        reasoning: false,
+        input: ['text'],
+        cost: { input: 0.3, output: 1.2, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 128000,
+        maxTokens: 8000,
+      },
+    ],
+  }),
 }))
 
 const { callModel, SUBMIT_TOOL_NAME } = await import('../src/core/llm/call.ts')
@@ -172,3 +198,5 @@ describe('callModel：结构化输出（submit 工具）', () => {
     expect(r.data).toBe('纯文本回复')
   })
 })
+
+

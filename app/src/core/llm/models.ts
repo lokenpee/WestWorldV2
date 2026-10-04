@@ -1,57 +1,80 @@
 import { createModels } from '@earendil-works/pi-ai/models'
 import { deepseekProvider } from '@earendil-works/pi-ai/providers/deepseek'
 import { IndexedDbCredentialStore } from './credentials.ts'
+import { buildProvider, DEFAULT_BASE_URL } from './provider.ts'
 
 /**
  * 模型配置。
  *
- * ADR-004：模型名、base URL、Key 全部走配置，**不硬编码在调用点**。
- * 只 import 用到的 provider 子路径 —— 绝不 import `providers/all`
- * （那会把所有供应商的 SDK 打进包；实测单 provider 是 312 KB 的懒加载 chunk）。
+ * 从「写死」改成「可配置」（ADR-004：模型名 / base URL / Key 全部走配置）：
+ * 用户在设置界面填的 baseUrl 与模型名会在这里生效。
  */
-export const MODEL_CONFIG = {
-  provider: 'deepseek',
-  /** 按用途分配模型：提取量大用便宜的，归并需要推理用强的。 */
-  models: {
-    extraction: 'deepseek-flash',
-    aggregation: 'deepseek-v4-pro',
-  },
-} as const
+export interface LlmConfig {
+  baseUrl: string
+  /** P1 逐章提取用：调用量最大，选便宜快的 */
+  extractionModel: string
+  /** P2/P3 归并用：需要推理与长上下文，选强的 */
+  aggregationModel: string
+}
 
-export type ModelRole = keyof typeof MODEL_CONFIG.models
+export const DEFAULT_LLM_CONFIG: LlmConfig = {
+  baseUrl: DEFAULT_BASE_URL,
+  extractionModel: 'deepseek-flash',
+  aggregationModel: 'deepseek-v4-pro',
+}
 
-let instance: ReturnType<typeof createModels> | null = null
+export type ModelRole = 'extraction' | 'aggregation'
 
-/** 取 Models 单例（注入 IndexedDB 版凭据存储）。 */
-export function getModels() {
-  if (instance) return instance
+/** DeepSeek 官方目录里的模型名（给设置界面做下拉用）。 */
+export function listCatalogModels(): string[] {
+  return deepseekProvider()
+    .getModels()
+    .map((m) => m.id)
+}
+
+interface Cache {
+  key: string
+  models: ReturnType<typeof createModels>
+}
+
+let cache: Cache | null = null
+
+function cacheKey(cfg: LlmConfig): string {
+  return [cfg.baseUrl, cfg.extractionModel, cfg.aggregationModel].join('|')
+}
+
+function getModelsFor(cfg: LlmConfig) {
+  const key = cacheKey(cfg)
+  if (cache?.key === key) return cache.models
+
   const models = createModels({ credentials: new IndexedDbCredentialStore() })
-  if (MODEL_CONFIG.provider === 'deepseek') {
-    models.setProvider(deepseekProvider())
-  }
-  instance = models
+  models.setProvider(
+    buildProvider({
+      baseUrl: cfg.baseUrl,
+      models: [cfg.extractionModel, cfg.aggregationModel],
+    }),
+  )
+  cache = { key, models }
   return models
 }
 
-/** 仅用于测试：重置单例。 */
-export function resetModelsForTest(): void {
-  instance = null
-}
-
 /** 取某个用途对应的模型对象。 */
-export function resolveModel(role: ModelRole) {
-  const models = getModels()
-  const id = MODEL_CONFIG.models[role]
-  const model = models.getModel(MODEL_CONFIG.provider, id)
+export function resolveModel(role: ModelRole, cfg: LlmConfig) {
+  const models = getModelsFor(cfg)
+  const id = role === 'extraction' ? cfg.extractionModel : cfg.aggregationModel
+  const model = models.getModel('deepseek', id)
   if (!model) {
-    throw new Error(`模型不存在：${MODEL_CONFIG.provider}/${id}（检查 MODEL_CONFIG）`)
+    throw new Error(`模型未注册：${id}（检查设置里的模型名，或点「拉取模型」看看有哪些）`)
   }
   return model
 }
 
-/** 列出当前 provider 下可用的模型 id（设置界面用）。 */
-export function listModelIds(): string[] {
-  return getModels()
-    .getModels(MODEL_CONFIG.provider)
-    .map((m) => m.id)
+/** 取 provider 实例（调用时用）。 */
+export function getModelsForConfig(cfg: LlmConfig) {
+  return getModelsFor(cfg)
+}
+
+/** 仅用于测试：重置缓存。 */
+export function resetModelsForTest(): void {
+  cache = null
 }

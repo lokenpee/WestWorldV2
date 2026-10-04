@@ -1,6 +1,7 @@
 import type { AssistantMessage, Context, Message, Tool, ToolCall } from '@earendil-works/pi-ai'
 import type { Static, TSchema } from '@sinclair/typebox'
 import { validate } from '@/core/schema/index.ts'
+import { getLlmConfig } from '@/core/config/settings.ts'
 import {
   backoffDelay,
   classifyError,
@@ -8,7 +9,7 @@ import {
   RETRY_POLICY,
   type ErrorKind,
 } from './errors.ts'
-import { getModels, resolveModel, type ModelRole } from './models.ts'
+import { getModelsForConfig, resolveModel, type ModelRole } from './models.ts'
 
 /** 结构化输出用的「提交工具」。模型必须调它来交结果。 */
 export const SUBMIT_TOOL_NAME = 'submit_result'
@@ -97,8 +98,9 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 export async function callModel<T extends TSchema>(
   opts: CallModelOptions<T>,
 ): Promise<CallModelResult<Static<T>>> {
-  const model = resolveModel(opts.role)
-  const models = getModels()
+  const cfg = await getLlmConfig()
+  const model = resolveModel(opts.role, cfg)
+  const models = getModelsForConfig(cfg)
   const attemptsUsage: CallUsage[] = []
   const messages: Message[] = [...opts.messages]
 
@@ -210,3 +212,4 @@ export async function callModel<T extends TSchema>(
     attempts: attempt,
   }
 }
+

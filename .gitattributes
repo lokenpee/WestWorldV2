@@ -1,0 +1,8 @@
+# bat 必须用 CRLF（LF 会让 cmd 解析错乱）
+*.bat text eol=crlf
+
+# 文本文件的换行统一交给 git 处理
+*.md text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.json text eol=lf
